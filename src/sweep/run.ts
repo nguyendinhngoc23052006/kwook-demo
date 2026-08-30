@@ -1,8 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 import { clean } from "./clean.js";
+import type { Observation } from "./detect.js";
+import { runDetectors } from "./events.js";
 import { fetchPage } from "./fetchSource.js";
 import { parseStoreIndex } from "./parse.js";
+import { type Product, resolveByAlias } from "./resolve.js";
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SECRET_KEY;
@@ -21,6 +24,11 @@ console.log(`sweep ${sweep.id} started`);
 
 const { data: sources } = await db.from("sources").select("*").eq("active", true);
 const { data: seeds } = await db.from("listing_urls").select("id,url,source_id");
+const { data: productRows } = await db.from("products").select("sku,aliases,reference_price_vnd");
+const products = (productRows ?? []) as (Product & { reference_price_vnd: number | null })[];
+const referenceBySku = new Map(
+  products.flatMap((p) => (p.reference_price_vnd ? [[p.sku, p.reference_price_vnd] as const] : [])),
+);
 
 let sourcesOk = 0;
 let observed = 0;
@@ -54,10 +62,20 @@ for (const src of (sources ?? []) as Src[]) {
 
       for (const p of parsed) {
         const productUrl = p.url ?? `${entry.url}#${p.title}`;
+        // Alias-first, zero tokens. A miss leaves product_sku null and the
+        // listing lands in the unresolved queue rather than being guessed at.
+        const hit = resolveByAlias(p.title, products);
         const { data: row, error: urlErr } = await db
           .from("listing_urls")
           .upsert(
-            { source_id: src.id, url: productUrl, last_seen_at: new Date().toISOString() },
+            {
+              source_id: src.id,
+              url: productUrl,
+              last_seen_at: new Date().toISOString(),
+              product_sku: hit?.sku ?? null,
+              resolve_confidence: hit?.confidence ?? null,
+              resolved_by: hit?.method ?? null,
+            },
             { onConflict: "url" },
           )
           .select("id")
@@ -120,6 +138,66 @@ for (const src of (sources ?? []) as Src[]) {
       .eq("id", src.id);
   }
 }
+
+// Derived, never observed: run the detectors over this sweep and the last.
+const { data: prevSweep } = await db
+  .from("sweeps")
+  .select("id")
+  .neq("id", sweep.id)
+  .order("started_at", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
+async function loadObservations(sweepId: string): Promise<Observation[]> {
+  const { data } = await db
+    .from("observations")
+    .select(
+      "listing_url_id,price_vnd,original_price_vnd,units_sold,brand_string,title_seen,observed_at,listing_urls(source_id,product_sku)",
+    )
+    .eq("sweep_id", sweepId);
+  type Row = {
+    listing_url_id: string;
+    price_vnd: number | null;
+    original_price_vnd: number | null;
+    units_sold: number | null;
+    brand_string: string | null;
+    title_seen: string | null;
+    observed_at: string;
+    listing_urls: { source_id: string; product_sku: string | null } | null;
+  };
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    listingUrlId: r.listing_url_id,
+    sellerId: r.listing_urls?.source_id ?? "unknown",
+    productSku: r.listing_urls?.product_sku ?? null,
+    title: r.title_seen ?? "",
+    priceVnd: r.price_vnd,
+    originalPriceVnd: r.original_price_vnd,
+    unitsSold: r.units_sold,
+    brandString: r.brand_string,
+    observedAt: r.observed_at,
+  }));
+}
+
+const currentObs = await loadObservations(sweep.id);
+const previousObs = prevSweep ? await loadObservations(prevSweep.id) : [];
+const findings = runDetectors(currentObs, previousObs, referenceBySku);
+
+if (findings.length > 0) {
+  const { error: evErr } = await db.from("events").insert(
+    findings.map((f) => ({
+      sweep_id: sweep.id,
+      type: f.type,
+      severity: f.severity,
+      product_sku: f.productSku,
+      listing_url_id: f.listingUrlId,
+      old_value: f.oldValue,
+      new_value: f.newValue,
+      rule_id: f.type,
+    })),
+  );
+  if (evErr) errors.push({ stage: "events", error: evErr.message });
+}
+console.log(`${findings.length} finding(s) from ${currentObs.length} observations`);
 
 await db
   .from("sweeps")
