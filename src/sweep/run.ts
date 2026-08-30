@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
-import { clean, splitListings } from "./clean.js";
+import { clean } from "./clean.js";
 import { fetchPage } from "./fetchSource.js";
+import { parseStoreIndex } from "./parse.js";
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SECRET_KEY;
@@ -9,7 +10,7 @@ if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY are requ
 
 const db = createClient(url, key, { auth: { persistSession: false } });
 
-type Src = { id: string; fetch_strategy: string; active: boolean; consecutive_failures: number };
+type Src = { id: string; fetch_strategy: string; consecutive_failures: number };
 type Listing = { id: string; url: string; source_id: string };
 
 const errors: unknown[] = [];
@@ -19,67 +20,93 @@ if (sweepErr || !sweep) throw new Error(`could not open a sweep: ${sweepErr?.mes
 console.log(`sweep ${sweep.id} started`);
 
 const { data: sources } = await db.from("sources").select("*").eq("active", true);
-const { data: listings } = await db.from("listing_urls").select("id,url,source_id");
+const { data: seeds } = await db.from("listing_urls").select("id,url,source_id");
 
 let sourcesOk = 0;
 let observed = 0;
 
 for (const src of (sources ?? []) as Src[]) {
-  const mine = ((listings ?? []) as Listing[]).filter((l) => l.source_id === src.id);
-  if (mine.length === 0) {
+  const entryPoints = ((seeds ?? []) as Listing[]).filter((l) => l.source_id === src.id);
+  if (entryPoints.length === 0) {
     console.log(`${src.id}: no listing urls seeded, skipping`);
     continue;
   }
 
-  let sourceHadSuccess = false;
+  let ok = false;
 
-  for (const listing of mine) {
-    const res = await fetchPage(listing.url);
+  for (const entry of entryPoints) {
+    const res = await fetchPage(entry.url);
     if (!res.ok) {
-      console.log(`${src.id}: FAIL ${listing.url} - ${res.error}`);
-      errors.push({ source: src.id, url: listing.url, error: res.error });
+      console.log(`${src.id}: FAIL ${entry.url} - ${res.error}`);
+      errors.push({ source: src.id, url: entry.url, error: res.error });
       continue;
     }
-    sourceHadSuccess = true;
+    ok = true;
 
-    // Keep the untouched HTML for this run. clean() is lossy - it drops the
-    // sale price whenever a strikethrough anchor is present - so the parser is
-    // built and tested against raw markup, not against cleaned text.
-    // Not a dotted directory: upload-artifact@v4 defaults to
-    // include-hidden-files: false and skips it without failing the step.
     await mkdir("fixtures/raw", { recursive: true });
     await writeFile(`fixtures/raw/${src.id}.html`, res.html, "utf8");
 
-    const text = clean(res.html);
-    // A store index yields many blocks from one fetch; a single page yields one.
-    const blocks =
-      src.fetch_strategy === "store_index" ? splitListings(text) : [text.slice(0, 8000)];
-    console.log(`${src.id}: ${listing.url} -> ${blocks.length} block(s), ${text.length} chars`);
+    if (src.fetch_strategy === "store_index") {
+      // One fetch, many products - each gets its own listing_urls row so the
+      // per-listing history the detectors need is actually per listing.
+      const parsed = parseStoreIndex(res.html);
+      console.log(`${src.id}: ${entry.url} -> ${parsed.length} listings parsed`);
 
-    // raw_excerpt holds the untouched markup, not a cleaned derivative.
-    // clean()/splitListings is lossy - it drops the sale price whenever a
-    // strikethrough anchor is present - so storing its output would bake that
-    // loss into the record. parse.ts reads this column.
-    const { error } = await db.from("observations").upsert(
-      {
-        listing_url_id: listing.id,
-        sweep_id: sweep.id,
-        raw_excerpt: res.html.slice(0, 400_000),
-        title_seen: blocks[0]?.slice(0, 200) ?? null,
-      },
-      { onConflict: "listing_url_id,sweep_id" },
-    );
-    if (error) errors.push({ source: src.id, url: listing.url, error: error.message });
-    else observed += blocks.length;
+      for (const p of parsed) {
+        const productUrl = p.url ?? `${entry.url}#${p.title}`;
+        const { data: row, error: urlErr } = await db
+          .from("listing_urls")
+          .upsert(
+            { source_id: src.id, url: productUrl, last_seen_at: new Date().toISOString() },
+            { onConflict: "url" },
+          )
+          .select("id")
+          .single();
+        if (urlErr || !row) {
+          errors.push({ source: src.id, url: productUrl, error: urlErr?.message });
+          continue;
+        }
 
-    await db
-      .from("listing_urls")
-      .update({ last_seen_at: new Date().toISOString() })
-      .eq("id", listing.id);
+        const { error: obsErr } = await db.from("observations").upsert(
+          {
+            listing_url_id: row.id,
+            sweep_id: sweep.id,
+            price_vnd: p.priceVnd,
+            original_price_vnd: p.originalPriceVnd,
+            discount_pct: p.discountPct,
+            units_sold: p.unitsSold,
+            review_count: p.reviewCount,
+            title_seen: p.title,
+            in_stock: p.priceVnd !== null,
+          },
+          { onConflict: "listing_url_id,sweep_id" },
+        );
+        if (obsErr) errors.push({ source: src.id, url: productUrl, error: obsErr.message });
+        else observed++;
+      }
+    } else {
+      // Single-page sources keep raw markup until each gets its own parser.
+      const { error } = await db.from("observations").upsert(
+        {
+          listing_url_id: entry.id,
+          sweep_id: sweep.id,
+          raw_excerpt: res.html.slice(0, 400_000),
+          title_seen: clean(res.html).slice(0, 200),
+        },
+        { onConflict: "listing_url_id,sweep_id" },
+      );
+      if (error) errors.push({ source: src.id, url: entry.url, error: error.message });
+      else observed++;
+      await db
+        .from("listing_urls")
+        .update({ last_seen_at: new Date().toISOString() })
+        .eq("id", entry.id);
+    }
+
     await new Promise((r) => setTimeout(r, 3000)); // be a polite crawler
   }
 
-  if (sourceHadSuccess) {
+  if (ok) {
     sourcesOk++;
     await db
       .from("sources")

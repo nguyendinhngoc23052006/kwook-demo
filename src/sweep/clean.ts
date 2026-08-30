@@ -14,17 +14,3 @@ export function clean(html: string): string {
     .replace(/\n\s*\n+/g, "\n")
     .trim();
 }
-
-/**
- * Split a store-index page into per-listing text blocks.
- * Heuristic for night one: cut on the Vietnamese currency marker, which ends
- * every product card. Replaced by a fixture-driven parser once we have a
- * saved kitbuy page to test against.
- */
-export function splitListings(text: string, cap = 8000): string[] {
-  const parts = text
-    .split(/(?<=[\d.]{4,}\s*[₫đ])\s*/u)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 40 && /[\d.]{4,}\s*[₫đ]/u.test(s));
-  return (parts.length ? parts : [text]).map((s) => s.slice(0, cap));
-}
