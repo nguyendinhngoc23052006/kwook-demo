@@ -39,7 +39,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: raw-html
-          path: .fixtures/
+          path: fixtures/raw/
           retention-days: 3
           if-no-files-found: warn
 
