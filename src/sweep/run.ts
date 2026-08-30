@@ -56,13 +56,15 @@ for (const src of (sources ?? []) as Src[]) {
       src.fetch_strategy === "store_index" ? splitListings(text) : [text.slice(0, 8000)];
     console.log(`${src.id}: ${listing.url} -> ${blocks.length} block(s), ${text.length} chars`);
 
-    // Night one stores cleaned text only. Extraction backfills over raw_excerpt
-    // once extract.ts lands, so nothing observed tonight is wasted.
+    // raw_excerpt holds the untouched markup, not a cleaned derivative.
+    // clean()/splitListings is lossy - it drops the sale price whenever a
+    // strikethrough anchor is present - so storing its output would bake that
+    // loss into the record. parse.ts reads this column.
     const { error } = await db.from("observations").upsert(
       {
         listing_url_id: listing.id,
         sweep_id: sweep.id,
-        raw_excerpt: blocks.join("\n---\n").slice(0, 200_000),
+        raw_excerpt: res.html.slice(0, 400_000),
         title_seen: blocks[0]?.slice(0, 200) ?? null,
       },
       { onConflict: "listing_url_id,sweep_id" },
