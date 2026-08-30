@@ -2,7 +2,7 @@ name: sweep
 
 on:
   schedule:
-    - cron: "0 19 * * *"   # 02:00 ICT
+    - cron: "0 * * * *"   # hourly; GitHub may skip some hours under load
   workflow_dispatch:
 
 concurrency:
@@ -30,6 +30,18 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: npm run sweep
+
+      # Ground truth for the parser. The cleaned text loses the sale price when
+      # a strikethrough anchor is present, so the parser is written against raw
+      # HTML and tested against a committed fixture - never against guesswork.
+      - name: Upload raw HTML fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-html
+          path: .fixtures/
+          retention-days: 3
+          if-no-files-found: warn
 
       - name: Report a failed sweep
         if: failure()
