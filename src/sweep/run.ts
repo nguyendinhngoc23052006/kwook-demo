@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
-import { fetchPage } from "./fetchSource.js";
 import { clean, splitListings } from "./clean.js";
+import { fetchPage } from "./fetchSource.js";
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SECRET_KEY;
@@ -14,8 +14,7 @@ type Listing = { id: string; url: string; source_id: string };
 
 const errors: unknown[] = [];
 
-const { data: sweep, error: sweepErr } = await db
-  .from("sweeps").insert({}).select().single();
+const { data: sweep, error: sweepErr } = await db.from("sweeps").insert({}).select().single();
 if (sweepErr || !sweep) throw new Error(`could not open a sweep: ${sweepErr?.message}`);
 console.log(`sweep ${sweep.id} started`);
 
@@ -53,7 +52,8 @@ for (const src of (sources ?? []) as Src[]) {
 
     const text = clean(res.html);
     // A store index yields many blocks from one fetch; a single page yields one.
-    const blocks = src.fetch_strategy === "store_index" ? splitListings(text) : [text.slice(0, 8000)];
+    const blocks =
+      src.fetch_strategy === "store_index" ? splitListings(text) : [text.slice(0, 8000)];
     console.log(`${src.id}: ${listing.url} -> ${blocks.length} block(s), ${text.length} chars`);
 
     // Night one stores cleaned text only. Extraction backfills over raw_excerpt
@@ -70,32 +70,42 @@ for (const src of (sources ?? []) as Src[]) {
     if (error) errors.push({ source: src.id, url: listing.url, error: error.message });
     else observed += blocks.length;
 
-    await db.from("listing_urls").update({ last_seen_at: new Date().toISOString() }).eq("id", listing.id);
+    await db
+      .from("listing_urls")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("id", listing.id);
     await new Promise((r) => setTimeout(r, 3000)); // be a polite crawler
   }
 
   if (sourceHadSuccess) {
     sourcesOk++;
-    await db.from("sources")
+    await db
+      .from("sources")
       .update({ consecutive_failures: 0, last_success_at: new Date().toISOString() })
       .eq("id", src.id);
   } else {
     const fails = src.consecutive_failures + 1;
-    await db.from("sources")
+    await db
+      .from("sources")
       .update({ consecutive_failures: fails, active: fails < 3 })
       .eq("id", src.id);
   }
 }
 
-await db.from("sweeps").update({
-  finished_at: new Date().toISOString(),
-  sources_attempted: (sources ?? []).length,
-  sources_ok: sourcesOk,
-  listings_observed: observed,
-  errors,
-}).eq("id", sweep.id);
+await db
+  .from("sweeps")
+  .update({
+    finished_at: new Date().toISOString(),
+    sources_attempted: (sources ?? []).length,
+    sources_ok: sourcesOk,
+    listings_observed: observed,
+    errors,
+  })
+  .eq("id", sweep.id);
 
-console.log(`sweep ${sweep.id} done: ${sourcesOk}/${(sources ?? []).length} sources ok, ${observed} listings`);
+console.log(
+  `sweep ${sweep.id} done: ${sourcesOk}/${(sources ?? []).length} sources ok, ${observed} listings`,
+);
 if (errors.length) {
   console.log(`${errors.length} error(s):`, JSON.stringify(errors, null, 2));
   process.exit(1);

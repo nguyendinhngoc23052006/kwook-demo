@@ -1,9 +1,7 @@
 const UA =
   "gia-san-monitor/0.1 (+https://github.com/nguyendinhngoc23052006/kwook-demo) price-integrity research";
 
-export type FetchResult =
-  | { ok: true; html: string }
-  | { ok: false; error: string };
+export type FetchResult = { ok: true; html: string } | { ok: false; error: string };
 
 export async function fetchPage(url: string, timeoutMs = 20_000): Promise<FetchResult> {
   for (let attempt = 0; attempt < 2; attempt++) {

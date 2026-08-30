@@ -6,19 +6,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": [
-      "node",
-      "vite/client",
-      "vitest/globals"
-    ],
+    "types": ["node", "vite/client", "vitest/globals"],
     "jsx": "react-jsx",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

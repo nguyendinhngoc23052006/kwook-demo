@@ -38,9 +38,8 @@ export function App() {
       {!loading && !error && !sweep && <p>Chưa có lượt quét nào.</p>}
       {sweep && (
         <p>
-          Quét lúc {new Date(sweep.started_at).toLocaleString("vi-VN")} ·{" "}
-          {sweep.sources_ok}/{sweep.sources_attempted} nguồn OK ·{" "}
-          {sweep.listings_observed} listing
+          Quét lúc {new Date(sweep.started_at).toLocaleString("vi-VN")} · {sweep.sources_ok}/
+          {sweep.sources_attempted} nguồn OK · {sweep.listings_observed} listing
           {!sweep.finished_at && " · đang chạy"}
         </p>
       )}
