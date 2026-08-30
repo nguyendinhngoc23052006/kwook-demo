@@ -3,3 +3,4 @@ dist/
 .env
 .claude/scope.json
 .claude/scope-migrations/
+.fixtures/

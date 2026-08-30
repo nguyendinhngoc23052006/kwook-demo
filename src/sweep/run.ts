@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 import { fetchPage } from "./fetchSource.js";
 import { clean, splitListings } from "./clean.js";
@@ -41,6 +42,12 @@ for (const src of (sources ?? []) as Src[]) {
       continue;
     }
     sourceHadSuccess = true;
+
+    // Keep the untouched HTML for this run. clean() is lossy - it drops the
+    // sale price whenever a strikethrough anchor is present - so the parser is
+    // built and tested against raw markup, not against cleaned text.
+    await mkdir(".fixtures", { recursive: true });
+    await writeFile(`.fixtures/${src.id}.html`, res.html, "utf8");
 
     const text = clean(res.html);
     // A store index yields many blocks from one fetch; a single page yields one.
