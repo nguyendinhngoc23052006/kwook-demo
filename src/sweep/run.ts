@@ -46,8 +46,10 @@ for (const src of (sources ?? []) as Src[]) {
     // Keep the untouched HTML for this run. clean() is lossy - it drops the
     // sale price whenever a strikethrough anchor is present - so the parser is
     // built and tested against raw markup, not against cleaned text.
-    await mkdir(".fixtures", { recursive: true });
-    await writeFile(`.fixtures/${src.id}.html`, res.html, "utf8");
+    // Not a dotted directory: upload-artifact@v4 defaults to
+    // include-hidden-files: false and skips it without failing the step.
+    await mkdir("fixtures/raw", { recursive: true });
+    await writeFile(`fixtures/raw/${src.id}.html`, res.html, "utf8");
 
     const text = clean(res.html);
     // A store index yields many blocks from one fetch; a single page yields one.
