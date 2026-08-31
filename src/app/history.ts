@@ -10,13 +10,28 @@ export type Snapshot = {
   title_seen: string | null;
   price_vnd: number | null;
   units_sold: number | null;
+  /** Who is selling it. A change nobody can attribute is not actionable. */
+  source_id: string;
+  product_sku: string | null;
 };
 
 export type Change = {
   listing_url_id: string;
   title: string;
   observed_at: string;
-  field: "price" | "units_sold";
+  source_id: string;
+  product_sku: string | null;
+  /**
+   * price        - the seller moved the price. The only one that is news.
+   * first_price  - we could not read a price before and now can. That is a
+   *                fact about OUR parser, not about the seller, and showing
+   *                it as "— → 10.800 đ" invites the reader to think a seller
+   *                did something.
+   * price_lost   - we could read it before and cannot now: a parser or page
+   *                regression, worth surfacing loudly.
+   * units_sold   - the cumulative counter grew, i.e. units actually sold.
+   */
+  kind: "price" | "first_price" | "price_lost" | "units_sold";
   from: number | null;
   to: number | null;
 };
@@ -46,11 +61,18 @@ export function changesBetween(snapshots: Snapshot[]): Change[] {
       const title = cur.title_seen ?? prev.title_seen ?? "(không có tiêu đề)";
 
       if (prev.price_vnd !== cur.price_vnd) {
+        // Separate what the SELLER did from what our parser did. Both matter,
+        // but conflating them makes every parser improvement look like a
+        // market event.
+        const kind =
+          prev.price_vnd === null ? "first_price" : cur.price_vnd === null ? "price_lost" : "price";
         out.push({
           listing_url_id: cur.listing_url_id,
           title,
           observed_at: cur.observed_at,
-          field: "price",
+          source_id: cur.source_id,
+          product_sku: cur.product_sku,
+          kind,
           from: prev.price_vnd,
           to: cur.price_vnd,
         });
@@ -62,7 +84,9 @@ export function changesBetween(snapshots: Snapshot[]): Change[] {
           listing_url_id: cur.listing_url_id,
           title,
           observed_at: cur.observed_at,
-          field: "units_sold",
+          source_id: cur.source_id,
+          product_sku: cur.product_sku,
+          kind: "units_sold",
           from: prev.units_sold,
           to: cur.units_sold,
         });

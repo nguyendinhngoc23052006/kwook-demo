@@ -9,6 +9,8 @@ function snap(over: Partial<Snapshot>): Snapshot {
     title_seen: "Rong biển",
     price_vnd: 120_000,
     units_sold: 10,
+    source_id: "kitbuy",
+    product_sku: "SKU-A",
     ...over,
   };
 }
@@ -33,7 +35,7 @@ describe("changesBetween", () => {
       snap({ observed_at: "2026-08-30T20:00:00Z", price_vnd: 99_000 }),
     ]);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ field: "price", from: 120_000, to: 99_000 });
+    expect(out[0]).toMatchObject({ kind: "price", from: 120_000, to: 99_000, source_id: "kitbuy" });
   });
 
   it("reports a price becoming unreadable, so a parser regression surfaces", () => {
@@ -41,7 +43,7 @@ describe("changesBetween", () => {
       snap({ observed_at: "2026-08-30T19:00:00Z", price_vnd: 120_000 }),
       snap({ observed_at: "2026-08-30T20:00:00Z", price_vnd: null }),
     ]);
-    expect(out[0]).toMatchObject({ field: "price", from: 120_000, to: null });
+    expect(out[0]).toMatchObject({ kind: "price_lost", from: 120_000, to: null });
   });
 
   it("counts units growth as a sale but ignores a counter reset", () => {
@@ -50,7 +52,7 @@ describe("changesBetween", () => {
       snap({ observed_at: "2026-08-30T20:00:00Z", units_sold: 14 }),
     ]);
     expect(grew).toHaveLength(1);
-    expect(grew[0]).toMatchObject({ field: "units_sold", from: 10, to: 14 });
+    expect(grew[0]).toMatchObject({ kind: "units_sold", from: 10, to: 14 });
 
     const dropped = changesBetween([
       snap({ observed_at: "2026-08-30T19:00:00Z", units_sold: 14 }),
@@ -67,5 +69,41 @@ describe("changesBetween", () => {
       snap({ listing_url_id: "L2", observed_at: "2026-08-30T22:00:00Z", price_vnd: 400 }),
     ]);
     expect(out.map((c) => c.observed_at)).toEqual(["2026-08-30T22:00:00Z", "2026-08-30T20:00:00Z"]);
+  });
+});
+
+describe("changesBetween attribution", () => {
+  it("calls a null-to-number reading a first_price, not a seller move", () => {
+    const out = changesBetween([
+      snap({ observed_at: "2026-08-30T19:00:00Z", price_vnd: null }),
+      snap({ observed_at: "2026-08-30T20:00:00Z", price_vnd: 10_800 }),
+    ]);
+    expect(out[0]?.kind).toBe("first_price");
+  });
+
+  it("calls a number-to-null price_lost, so a parser regression is loud", () => {
+    const out = changesBetween([
+      snap({ observed_at: "2026-08-30T19:00:00Z", price_vnd: 10_800 }),
+      snap({ observed_at: "2026-08-30T20:00:00Z", price_vnd: null }),
+    ]);
+    expect(out[0]?.kind).toBe("price_lost");
+  });
+
+  it("carries the seller and the sku so a change can be attributed", () => {
+    const out = changesBetween([
+      snap({
+        observed_at: "2026-08-30T19:00:00Z",
+        price_vnd: 100,
+        source_id: "abby",
+        product_sku: "KW-X",
+      }),
+      snap({
+        observed_at: "2026-08-30T20:00:00Z",
+        price_vnd: 200,
+        source_id: "abby",
+        product_sku: "KW-X",
+      }),
+    ]);
+    expect(out[0]).toMatchObject({ kind: "price", source_id: "abby", product_sku: "KW-X" });
   });
 });
