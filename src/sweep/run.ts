@@ -6,7 +6,7 @@ import { runDetectors } from "./events.js";
 import { fetchPage } from "./fetchSource.js";
 import { parseStoreIndex } from "./parse.js";
 import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
-import { MODEL, proposeResolutions } from "./propose.js";
+import { proposeResolutions } from "./propose.js";
 import { type Product, resolveByAlias } from "./resolve.js";
 import { classifyScope } from "./scope.js";
 
@@ -238,7 +238,7 @@ for (const src of (sources ?? []) as Src[]) {
 
     const titles = [...titleFor.values()];
     try {
-      const proposals = await proposeResolutions(titles, catalogue);
+      const { proposals, model } = await proposeResolutions(titles, catalogue);
       const byTitle = new Map(proposals.map((p) => [p.title, p]));
 
       for (const [listingUrlId, title] of titleFor) {
@@ -252,13 +252,16 @@ for (const src of (sources ?? []) as Src[]) {
             proposed_sku: p.proposed_sku,
             confidence: p.confidence,
             reasoning: p.reasoning,
-            model: MODEL,
+            model,
           },
           { onConflict: "listing_url_id" },
         );
         if (error) errors.push({ stage: "propose", error: error.message });
       }
-      console.log(`${proposals.length} resolution proposal(s) from ${titles.length} title(s)`);
+      console.log(
+        `${proposals.length} resolution proposal(s) from ${titles.length} title(s)` +
+          (model ? ` via ${model}` : ""),
+      );
     } catch (e) {
       // A model outage must never fail a sweep: the observations are the
       // product, the proposals are an assist.
