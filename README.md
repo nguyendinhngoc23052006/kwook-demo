@@ -40,19 +40,28 @@ price.
 ## How it works
 
 ```
-GitHub Actions (hourly cron)
-      │  fetch → parse → resolve → detect
+Cloudflare Worker (cron, every 30 min)
+      │  one POST: workflow_dispatch
+      ▼
+GitHub Actions (one job, five sweeps an hour apart)
+      │  fetch → parse → scope → resolve → detect → propose
       ▼
   Supabase Postgres  ──────────►  Cloudflare Pages
-  (7 tables, RLS)                 (React dashboard, reads directly)
+  (8 tables, RLS)                 (React dashboard, reads directly)
 ```
 
-Four moving parts, all on free tiers:
+Five moving parts, all on free tiers:
 
-- **GitHub Actions** runs the sweep on a `0 * * * *` cron and gates every
-  merge. Scheduled workflows are free and unmetered on public repos, which is
-  why the sweep lives here rather than in a Cloudflare Cron Trigger — the
-  Workers free tier caps cron invocations at 10 ms CPU and 50 subrequests.
+- **GitHub Actions** runs the sweep and gates every merge. Minutes are free and
+  unmetered on a public repo, which is why the scraping, parsing and detecting
+  all live here rather than in a Worker — the Workers free tier caps a cron
+  invocation at 10 ms CPU and 50 subrequests, and a sweep needs far more of
+  both.
+- **A Cloudflare Worker** (`timer/`) starts that job, and does nothing else.
+  GitHub documents its own `schedule` event as best-effort — delayed under load,
+  and dropped when load is high enough — and measured on this repo it fired
+  twice in two days. The work stays in Actions; only the clock moved. See
+  [`timer/README.md`](timer/README.md).
 - **Supabase Postgres** stores everything. Schema changes are migration files
   in `supabase/migrations/`; the database is never edited by hand.
 - **Cloudflare Pages** serves the dashboard, deployed by its GitHub
@@ -61,9 +70,12 @@ Four moving parts, all on free tiers:
 
 ### The sweep
 
-One HTTP request to the seller's store index returns all 29 listings.
-`src/sweep/parse.ts` extracts each card with deterministic regex — no model
-call, so an hourly cadence costs nothing and cannot drift between runs.
+One HTTP request to the primary seller's store index returns all 30 of its
+listings; two smaller sources are read a page at a time. `src/sweep/parse.ts`
+extracts each card with deterministic regex — no model call, so an hourly
+cadence costs nothing and cannot drift between runs. A model is used exactly
+once per sweep, at the very end, on the residue the rules could not resolve
+(see **Where the model is used** below).
 
 Parsing marketplace HTML has two traps this handles explicitly:
 
@@ -99,6 +111,33 @@ without that guard, a quiet market would flag every listing at once.
 `attribution_loss` is **deliberately not run**. The source's cards carry no
 brand field, so every listing would score as a finding every hour. A detector
 that always fires is noise, not signal.
+
+### Where the model is used
+
+Once per sweep, last, and only on what the rules could not do.
+
+Everything above is deterministic: regex parsing, an explicit competitor-brand
+filter, exact alias matching, arithmetic thresholds. What none of that can do is
+decide whether a title a human typed into a marketplace form refers to a product
+in the catalogue — which is why `"Rong biển vụn rắc cơm GÓI TO 300g, 400g"` sat
+unresolved through every sweep.
+
+`src/sweep/propose.ts` sends that residue — unresolved, in-scope titles only —
+to Gemini (free tier, REST, no SDK) with the catalogue, and writes the answers
+to `resolution_proposals` for a human to accept or reject. Three properties make
+it safe to run on a schedule:
+
+- **It proposes; it never writes a match.** No `product_sku` changes without a
+  person clicking accept.
+- **It is allowed to refuse.** On its first live run all six proposals came back
+  `null` with reasoning, including the case above: *"Tiêu đề chứa đồng thời hai
+  quy cách 300g và 400g nên không khớp SKU cụ thể."*
+- **Its output is untrusted input.** The response is parsed with a zod schema;
+  anything off-shape is discarded, and a model outage records an error on the
+  sweep rather than failing it.
+
+It also catches things a rule would not: a Shopee **shop header** that the
+parser had recorded as a listing showed up in the proposals as "not a product".
 
 ### The dashboard
 
@@ -157,9 +196,15 @@ CI runs `tests`, `lint`, and `typecheck` on every pull request.
 
 Built and running. Not yet done:
 
-- The product catalogue holds 2 of ~17 SKUs, so most listings are unresolved.
-- Only one of five configured sources is implemented.
-- Model-assisted resolution for titles that alias matching misses is designed
-  but **not wired** — nothing in this repo calls a model today.
+- The catalogue holds 14 SKUs and resolves 28 of 37 listings; 6 are still
+  unmatched and 3 are competitor products the scope filter excludes.
+- Three of five sources sweep cleanly (kitbuy, abby, tiki). The other two —
+  Kwook's own site and a Tripmap aggregator page — answer scrapers with a
+  challenge page and have deactivated themselves after three failures each.
+  That is the honest state of the market, not a gap in the code.
+- **No reference price exists yet.** `reference_price_vnd` is null for all 14
+  products, so `floor_breach` has never fired; every finding on the dashboard
+  comes from comparing listings against each other. Kwook's official price
+  list would close this.
 - An **Đánh giá** screen scoring detector precision against labelled fixtures
   is planned.
