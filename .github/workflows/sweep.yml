@@ -13,6 +13,10 @@ on:
     # of the second run is a row in the sweep log.
     - cron: "17,47 * * * *"
   workflow_dispatch:
+    inputs:
+      iterations:
+        description: "How many hourly sweeps this job should run before exiting"
+        default: "5"
 
 concurrency:
   group: sweep
@@ -22,7 +26,10 @@ jobs:
   sweep:
     name: sweep
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Long by design: this job sweeps hourly from the inside (see the loop
+    # below), so it lives for hours rather than minutes. The ceiling on a
+    # GitHub-hosted job is 6 hours; this stays under it.
+    timeout-minutes: 340
     permissions:
       contents: read
       issues: write
@@ -33,12 +40,46 @@ jobs:
           node-version: "lts/*"
           cache: npm
       - run: npm ci || npm install
-      - name: Run the nightly sweep
+      # One job, several sweeps, an hour apart.
+      #
+      # GitHub's scheduler is best-effort: it documents that `schedule` is
+      # delayed under load and that queued runs may be DROPPED. Measured on
+      # this repo, it is not merely late - across 31 Aug it fired twice all
+      # day, and missed six consecutive :17/:47 slots. No cron expression
+      # fixes that, because the problem is not which minute we ask for.
+      #
+      # So the schedule is demoted to a STARTER, and the cadence is kept
+      # inside the job: each firing runs several sweeps an hour apart. One
+      # lucky trigger now buys ~5 hours of hourly data instead of a single
+      # sample. Actions minutes are free and unmetered on a public repo, so
+      # the runner time costs nothing.
+      #
+      # A failed sweep does not abandon the remaining hours - it is recorded
+      # and the loop continues, then the step fails at the end so the issue
+      # still gets opened.
+      - name: Sweep hourly for the life of this job
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: npm run sweep
+        run: |
+          set -u
+          total="${{ inputs.iterations || '5' }}"
+          failures=0
+          for i in $(seq 1 "$total"); do
+            echo "::group::sweep $i of $total"
+            if ! npm run sweep; then
+              failures=$((failures + 1))
+              echo "sweep $i failed; continuing so the remaining hours still run"
+            fi
+            echo "::endgroup::"
+            if [ "$i" -lt "$total" ]; then
+              echo "sleeping 55 minutes before sweep $((i + 1))"
+              sleep 3300
+            fi
+          done
+          echo "$failures of $total sweeps failed"
+          [ "$failures" -eq 0 ]
 
       # Ground truth for the parser. The cleaned text loses the sale price when
       # a strikethrough anchor is present, so the parser is written against raw
