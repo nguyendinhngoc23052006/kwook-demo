@@ -1,6 +1,6 @@
 import { ago, count, vnd, when } from "./format.js";
 import { changesBetween, type Snapshot } from "./history.js";
-import type { Sweep } from "./useDashboard.js";
+import { type Sweep, wasInterrupted } from "./useDashboard.js";
 
 /**
  * Two records, not a chart. Prices on a store index move rarely, so a graph of
@@ -122,8 +122,12 @@ export function DienBien({
                 {s.sources_ok}/{s.sources_attempted}
               </td>
               <td className="num">{count(s.listings_observed)}</td>
-              <td className={s.finished_at === null ? "warn" : "muted"}>
-                {s.finished_at === null ? "đang chạy" : when(s.finished_at)}
+              <td className={s.finished_at === null || wasInterrupted(s) ? "warn" : "muted"}>
+                {wasInterrupted(s)
+                  ? "bị gián đoạn"
+                  : s.finished_at === null
+                    ? "đang chạy"
+                    : when(s.finished_at)}
               </td>
             </tr>
           ))}

@@ -20,6 +20,25 @@ type Listing = { id: string; url: string; source_id: string };
 
 const errors: unknown[] = [];
 
+// Close out any sweep left open by an interrupted run.
+//
+// Concurrency is cancel-in-progress, so exactly one sweep run exists at a
+// time: any sweep still open when this one starts was abandoned, not racing
+// us. Cancelling during a FETCH rather than during the sleep leaves a row
+// with no counts that the dashboard renders as "đang chạy" forever - which
+// is how a 0-listing sweep ended up sitting at the top of the log.
+const { data: abandoned } = await db
+  .from("sweeps")
+  .update({
+    finished_at: new Date().toISOString(),
+    errors: [{ stage: "aborted", error: "interrupted; a newer sweep run replaced it" }],
+  })
+  .is("finished_at", null)
+  .select("id");
+if (abandoned && abandoned.length > 0) {
+  console.log(`closed ${abandoned.length} abandoned sweep(s)`);
+}
+
 const { data: sweep, error: sweepErr } = await db.from("sweeps").insert({}).select().single();
 if (sweepErr || !sweep) throw new Error(`could not open a sweep: ${sweepErr?.message}`);
 console.log(`sweep ${sweep.id} started`);
