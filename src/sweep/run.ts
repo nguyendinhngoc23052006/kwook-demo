@@ -5,6 +5,7 @@ import type { Observation } from "./detect.js";
 import { runDetectors } from "./events.js";
 import { fetchPage } from "./fetchSource.js";
 import { parseStoreIndex } from "./parse.js";
+import { parseProductPage } from "./parseProduct.js";
 import { type Product, resolveByAlias } from "./resolve.js";
 
 const url = process.env.SUPABASE_URL;
@@ -108,13 +109,25 @@ for (const src of (sources ?? []) as Src[]) {
         else observed++;
       }
     } else {
-      // Single-page sources keep raw markup until each gets its own parser.
+      // One product page, read through its structured markup rather than a
+      // per-site scraper. Raw HTML is still stored: when the parser finds
+      // nothing, that excerpt is the only way to see why.
+      const p = parseProductPage(res.html);
+      console.log(
+        `${src.id}: ${entry.url} -> ${p.priceVnd ?? "no price"} (${p.method ?? "no structured markup"})`,
+      );
+
       const { error } = await db.from("observations").upsert(
         {
           listing_url_id: entry.id,
           sweep_id: sweep.id,
+          price_vnd: p.priceVnd,
+          original_price_vnd: p.originalPriceVnd,
+          brand_string: p.brandString,
+          in_stock: p.priceVnd !== null,
           raw_excerpt: res.html.slice(0, 400_000),
-          title_seen: clean(res.html).slice(0, 200),
+          title_seen: p.title ?? clean(res.html).slice(0, 200),
+          extract_confidence: { method: p.method },
         },
         { onConflict: "listing_url_id,sweep_id" },
       );
