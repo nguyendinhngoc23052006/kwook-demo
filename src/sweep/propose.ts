@@ -34,6 +34,24 @@ import { z } from "zod";
 
 const API = "https://generativelanguage.googleapis.com/v1beta";
 
+/** How many models to try before giving up. Enough to skip a busy newest. */
+const MAX_CANDIDATES = 4;
+const RETRY_DELAY_MS = 2_000;
+
+/**
+ * What to do about an HTTP status, kept separate so the policy is testable
+ * without a network.
+ *
+ * 429 and 503 mean "busy, not broken" - the newest model is also the most
+ * contended, and this classification is not urgent enough to justify failing
+ * an hour of proposals over a spike.
+ */
+export function decide(status: number): "ok" | "retry" | "next" {
+  if (status >= 200 && status < 300) return "ok";
+  if (status === 429 || status === 503) return "retry";
+  return "next";
+}
+
 /** The model's JSON is untrusted input like any other. Validate, never assume. */
 const Proposal = z.object({
   title: z.string(),
@@ -66,9 +84,9 @@ export type CatalogueEntry = {
  * model since the task is short classification. GEMINI_MODEL overrides when
  * you want a specific one.
  */
-export async function pickModel(apiKey: string): Promise<string> {
+export async function listModels(apiKey: string): Promise<string[]> {
   const override = process.env.GEMINI_MODEL;
-  if (override) return override;
+  if (override) return [override];
 
   const res = await fetch(`${API}/models?key=${apiKey}&pageSize=200`);
   if (!res.ok) throw new Error(`listing models failed: HTTP ${res.status}`);
@@ -84,9 +102,7 @@ export async function pickModel(apiKey: string): Promise<string> {
     .filter((n) => n !== "" && !n.includes("exp") && !n.includes("preview"));
 
   const flash = usable.filter((n) => n.includes("flash"));
-  const chosen = (flash.length > 0 ? flash : usable).sort(byVersionDesc)[0];
-  if (!chosen) throw new Error("no Gemini model supports generateContent for this key");
-  return chosen;
+  return (flash.length > 0 ? flash : usable).sort(byVersionDesc);
 }
 
 /**
@@ -171,7 +187,11 @@ export async function proposeResolutions(
     return { proposals: [], model: "" };
   }
 
-  const model = await pickModel(apiKey);
+  const candidates = await listModels(apiKey);
+  if (candidates.length === 0) {
+    throw new Error("no Gemini model supports generateContent for this key");
+  }
+
   const catalogueText = catalogue
     .map(
       (p) =>
@@ -202,20 +222,44 @@ export async function proposeResolutions(
     }),
   };
 
-  let used = model;
-  let res = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+  // Walk the candidates newest-first. The newest model is also the busiest,
+  // so "high demand" on it is not a reason to give up on the whole step when
+  // the previous generation is sitting there idle and equally capable of
+  // this classification.
+  const queue = [...candidates.slice(0, MAX_CANDIDATES)];
+  const failures: string[] = [];
+  let used = "";
+  let res: Response | undefined;
 
-  if (res.status === 404) {
-    const detail = await res.text();
-    const replacement = replacementFrom(detail);
-    if (!replacement) throw new Error(`gemini ${used}: HTTP 404 ${detail.slice(0, 300)}`);
-    console.log(`gemini: ${used} is retired, retrying with ${replacement}`);
-    used = replacement;
-    res = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+  while (queue.length > 0) {
+    const model = queue.shift();
+    if (!model) break;
+    used = model;
+
+    let attempt = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+
+    // 503/429 are transient by definition. One short wait costs less than
+    // losing the proposals for an hour.
+    if (decide(attempt.status) === "retry") {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      attempt = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+    }
+
+    if (attempt.ok) {
+      res = attempt;
+      break;
+    }
+
+    const detail = await attempt.text();
+    failures.push(`${used}: HTTP ${attempt.status} ${detail.slice(0, 160)}`);
+
+    // A retirement 404 names its replacement; that pointer beats our ordering.
+    const replacement = attempt.status === 404 ? replacementFrom(detail) : null;
+    if (replacement && !queue.includes(replacement)) queue.unshift(replacement);
   }
 
-  if (!res.ok) {
-    throw new Error(`gemini ${used}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+  if (!res) {
+    throw new Error(`gemini: every candidate failed - ${failures.join(" | ")}`);
   }
 
   const body = (await res.json()) as {
