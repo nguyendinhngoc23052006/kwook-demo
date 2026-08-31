@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { proposeResolutions } from "./propose.js";
+import { byVersionDesc, proposeResolutions, replacementFrom } from "./propose.js";
 
 const saved = process.env.GEMINI_API_KEY;
 afterEach(() => {
@@ -33,5 +33,39 @@ describe("proposeResolutions", () => {
     // when a key IS present.
     process.env.GEMINI_API_KEY = "not-used-because-titles-is-empty";
     await expect(proposeResolutions([], catalogue)).resolves.toEqual({ proposals: [], model: "" });
+  });
+});
+
+describe("byVersionDesc", () => {
+  it("picks the newest, which a string sort got wrong in production", () => {
+    // The real failure: ascending string order chose gemini-2.5-flash, which
+    // ListModels advertises but the API refuses for new keys.
+    const models = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.0-flash"];
+    expect([...models].sort(byVersionDesc)[0]).toBe("gemini-3.6-flash");
+  });
+
+  it("compares versions numerically, so 10 beats 2", () => {
+    expect([...["gemini-2.5-flash", "gemini-10.0-flash"]].sort(byVersionDesc)[0]).toBe(
+      "gemini-10.0-flash",
+    );
+  });
+
+  it("orders by minor version when majors tie", () => {
+    expect([...["gemini-3.1-flash", "gemini-3.12-flash"]].sort(byVersionDesc)[0]).toBe(
+      "gemini-3.12-flash",
+    );
+  });
+});
+
+describe("replacementFrom", () => {
+  it("reads the successor out of Gemini's retirement message", () => {
+    // Verbatim from the sweep that failed.
+    const body =
+      '{"error":{"code":404,"message":"This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.6-flash for the latest features and improvements.","status":"NOT_FOUND"}}';
+    expect(replacementFrom(body)).toBe("gemini-3.6-flash");
+  });
+
+  it("returns null when the error names no successor, so the sweep reports it", () => {
+    expect(replacementFrom('{"error":{"code":404,"message":"not found"}}')).toBeNull();
   });
 });
