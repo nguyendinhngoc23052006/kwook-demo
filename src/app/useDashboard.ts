@@ -43,6 +43,8 @@ export type Dashboard = {
   products: Product[];
   events: EventRow[];
   sources: Source[];
+  /** How many entry-point URLs each source has. Zero means nothing to fetch. */
+  urlsBySource: Record<string, number>;
 };
 
 /**
@@ -92,15 +94,22 @@ export function useDashboard(): State {
 
       // Products and sources describe the setup, so they load even with no sweep
       // yet — that empty state should still show what is being watched.
-      const [productsRes, sourcesRes] = await Promise.all([
+      const [productsRes, sourcesRes, urlsRes] = await Promise.all([
         supabase.from("products").select("sku,name_canonical,reference_price_vnd"),
         supabase
           .from("sources")
           .select("id,display_name,domain,active,consecutive_failures,last_success_at")
           .order("id"),
+        supabase.from("listing_urls").select("source_id"),
       ]);
       if (productsRes.error) throw new Error(productsRes.error.message);
       if (sourcesRes.error) throw new Error(sourcesRes.error.message);
+      if (urlsRes.error) throw new Error(urlsRes.error.message);
+
+      const urlsBySource: Record<string, number> = {};
+      for (const row of urlsRes.data as { source_id: string }[]) {
+        urlsBySource[row.source_id] = (urlsBySource[row.source_id] ?? 0) + 1;
+      }
 
       let listings: ListingRow[] = [];
       let events: EventRow[] = [];
@@ -156,6 +165,7 @@ export function useDashboard(): State {
             products: productsRes.data as Product[],
             events,
             sources: sourcesRes.data as Source[],
+            urlsBySource,
           },
         });
       }
