@@ -10,8 +10,21 @@ export type Sweep = {
   sources_ok: number;
   sources_attempted: number;
   listings_observed: number;
-  errors: unknown;
+  errors: SweepError[];
 };
+
+/** What run.ts writes into sweeps.errors: a per-source failure, or an abort. */
+export type SweepError = {
+  stage?: string;
+  source?: string;
+  url?: string;
+  error?: string;
+};
+
+/** A run that was replaced mid-fetch. Not running, and not a real result. */
+export function wasInterrupted(s: Sweep): boolean {
+  return Array.isArray(s.errors) && s.errors.some((e) => e?.stage === "aborted");
+}
 
 export type Product = { sku: string; name_canonical: string; reference_price_vnd: number | null };
 
