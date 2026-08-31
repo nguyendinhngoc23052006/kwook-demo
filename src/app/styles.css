@@ -252,3 +252,13 @@ h2.section {
 h2.section:first-child {
   margin-top: 0;
 }
+
+.proposal {
+  max-width: 26rem;
+}
+.proposal .badge {
+  margin-left: 0.4rem;
+}
+.proposal .alert-why {
+  margin: 0.25rem 0 0.15rem;
+}
