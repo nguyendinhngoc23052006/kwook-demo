@@ -12,6 +12,8 @@ function listing(over: Partial<ListingRow>): ListingRow {
     original_price_vnd: null,
     units_sold: null,
     review_count: null,
+    out_of_scope: false,
+    out_of_scope_brand: null,
     ...over,
   };
 }

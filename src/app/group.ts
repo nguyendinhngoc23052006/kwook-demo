@@ -13,6 +13,9 @@ export type ListingRow = {
   original_price_vnd: number | null;
   units_sold: number | null;
   review_count: number | null;
+  /** Names a non-Kwook brand, so it will never resolve. Not pending work. */
+  out_of_scope: boolean;
+  out_of_scope_brand: string | null;
 };
 
 export type SkuGroup = {

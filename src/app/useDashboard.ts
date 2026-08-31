@@ -72,7 +72,13 @@ type ObservationJoin = {
   original_price_vnd: number | null;
   units_sold: number | null;
   review_count: number | null;
-  listing_urls: { url: string; product_sku: string | null; source_id: string } | null;
+  listing_urls: {
+    url: string;
+    product_sku: string | null;
+    source_id: string;
+    out_of_scope: boolean | null;
+    out_of_scope_brand: string | null;
+  } | null;
 };
 
 export function useDashboard(): State {
@@ -120,7 +126,7 @@ export function useDashboard(): State {
           supabase
             .from("observations")
             .select(
-              "listing_url_id,title_seen,price_vnd,original_price_vnd,units_sold,review_count,listing_urls(url,product_sku,source_id)",
+              "listing_url_id,title_seen,price_vnd,original_price_vnd,units_sold,review_count,listing_urls(url,product_sku,source_id,out_of_scope,out_of_scope_brand)",
             )
             .eq("sweep_id", sweep.id),
           supabase
@@ -164,6 +170,8 @@ export function useDashboard(): State {
           original_price_vnd: o.original_price_vnd,
           units_sold: o.units_sold,
           review_count: o.review_count,
+          out_of_scope: o.listing_urls?.out_of_scope ?? false,
+          out_of_scope_brand: o.listing_urls?.out_of_scope_brand ?? null,
         }));
         events = eventsRes.data as EventRow[];
       }
