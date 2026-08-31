@@ -36,6 +36,9 @@ export type EventRow = {
   listing_url_id: string | null;
   old_value: string | null;
   new_value: string | null;
+  /** Written per finding by a model. Null falls back to the static wording. */
+  explanation: string | null;
+  explained_by: string | null;
 };
 
 export type Source = {
@@ -158,7 +161,9 @@ export function useDashboard(): State {
             .eq("sweep_id", sweep.id),
           supabase
             .from("events")
-            .select("id,type,severity,product_sku,listing_url_id,old_value,new_value")
+            .select(
+              "id,type,severity,product_sku,listing_url_id,old_value,new_value,explanation,explained_by",
+            )
             .eq("sweep_id", sweep.id),
           supabase
             .from("observations")

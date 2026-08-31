@@ -40,28 +40,20 @@ price.
 ## How it works
 
 ```
-Cloudflare Worker (cron, every 30 min)
-      │  one POST: workflow_dispatch
-      ▼
 GitHub Actions (one job, five sweeps an hour apart)
-      │  fetch → parse → scope → resolve → detect → propose
+      │  fetch → parse → scope → resolve → detect → propose → explain
       ▼
   Supabase Postgres  ──────────►  Cloudflare Pages
   (8 tables, RLS)                 (React dashboard, reads directly)
 ```
 
-Five moving parts, all on free tiers:
+Four moving parts, all on free tiers:
 
 - **GitHub Actions** runs the sweep and gates every merge. Minutes are free and
-  unmetered on a public repo, which is why the scraping, parsing and detecting
-  all live here rather than in a Worker — the Workers free tier caps a cron
-  invocation at 10 ms CPU and 50 subrequests, and a sweep needs far more of
-  both.
-- **A Cloudflare Worker** (`timer/`) starts that job, and does nothing else.
-  GitHub documents its own `schedule` event as best-effort — delayed under load,
-  and dropped when load is high enough — and measured on this repo it fired
-  twice in two days. The work stays in Actions; only the clock moved. See
-  [`timer/README.md`](timer/README.md).
+  unmetered on a public repo, so the scraping, parsing and detecting all live
+  here. The `schedule` event is best-effort — GitHub documents it as delayed
+  under load and droppable — so the job paces itself once started rather than
+  relying on the scheduler for each hour.
 - **Supabase Postgres** stores everything. Schema changes are migration files
   in `supabase/migrations/`; the database is never edited by hand.
 - **Cloudflare Pages** serves the dashboard, deployed by its GitHub
@@ -114,13 +106,18 @@ that always fires is noise, not signal.
 
 ### Where the model is used
 
-Once per sweep, last, and only on what the rules could not do.
+Twice per sweep, both times last, and never on anything a rule can decide.
 
 Everything above is deterministic: regex parsing, an explicit competitor-brand
-filter, exact alias matching, arithmetic thresholds. What none of that can do is
-decide whether a title a human typed into a marketplace form refers to a product
-in the catalogue — which is why `"Rong biển vụn rắc cơm GÓI TO 300g, 400g"` sat
-unresolved through every sweep.
+filter, exact alias matching, arithmetic thresholds. Two jobs remain that rules
+are genuinely bad at, and the model does exactly those two. Both calls share one
+hardened transport in `src/sweep/gemini.ts` — runtime model discovery, a retry
+on 429/503, and a walk down to an older model when the newest is overloaded.
+
+**1. Deciding whether a marketplace title names a product in the catalogue.**
+Exact matching is why `"Rong biển vụn rắc cơm GÓI TO 300g, 400g"` sat unresolved
+through every sweep: it names two pack sizes, so no alias equals it and no
+threshold helps.
 
 `src/sweep/propose.ts` sends that residue — unresolved, in-scope titles only —
 to Gemini (free tier, REST, no SDK) with the catalogue, and writes the answers
@@ -139,12 +136,31 @@ it safe to run on a schedule:
 It also catches things a rule would not: a Shopee **shop header** that the
 parser had recorded as a listing showed up in the proposals as "not a product".
 
+**2. Saying what a finding means to the person who has to act on it.**
+
+`src/sweep/explain.ts` runs after every event is written and adds one Vietnamese
+sentence per finding to `events.explanation`. The detectors produce arithmetic —
+`dispersion, KW-VUN-400, +44,0%`. The dashboard used to bridge that with one
+fixed sentence per detector type: accurate, identical on every row of that type,
+and therefore skimmed past.
+
+The same three properties hold, for the same reasons. It runs **last**, so a
+finding exists whether or not the model answers. It writes **prose only** — it
+cannot change which findings fired, their severity, or a single number; the
+worst a bad sentence can do is read badly beside numbers that are still right.
+And it may **refuse**: a finding it omits keeps the static wording, so an outage
+degrades the dashboard to exactly what it showed before this existed.
+
+Numbers are formatted by code *before* the model sees them and are never asked
+for back. It is handed `160.000 – 699.000 đ (+336.9%)` and asked to explain it —
+a model restating a price is a model that can restate it wrong.
+
 ### The dashboard
 
 Five screens, all reading the latest sweep:
 
 - **Bảng giá** — listings grouped by SKU, worst spread first.
-- **Cảnh báo** — findings, explained in the seller's terms rather than the code's.
+- **Cảnh báo** — findings, each with a sentence written for that finding.
 - **Diễn biến** — what changed between sweeps, and the log of every run.
 - **Nguồn** — per-source health, including the three-strikes deactivation.
 - **Chưa khớp** — listings the resolver could not tie to a product.

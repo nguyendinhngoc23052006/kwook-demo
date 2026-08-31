@@ -4,6 +4,7 @@ import { clean } from "./clean.js";
 import { type QueueCandidate, stillListed } from "./current.js";
 import type { Observation } from "./detect.js";
 import { runDetectors } from "./events.js";
+import { explainFindings, type FindingContext } from "./explain.js";
 import { fetchPage } from "./fetchSource.js";
 import { parseStoreIndex } from "./parse.js";
 import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
@@ -330,19 +331,85 @@ const previousObs = prevSweep ? await loadObservations(prevSweep.id) : [];
 const findings = runDetectors(currentObs, previousObs, referenceBySku);
 
 if (findings.length > 0) {
-  const { error: evErr } = await db.from("events").insert(
-    findings.map((f) => ({
-      sweep_id: sweep.id,
-      type: f.type,
-      severity: f.severity,
-      product_sku: f.productSku,
-      listing_url_id: f.listingUrlId,
-      old_value: f.oldValue,
-      new_value: f.newValue,
-      rule_id: f.type,
-    })),
-  );
+  const { data: written, error: evErr } = await db
+    .from("events")
+    .insert(
+      findings.map((f) => ({
+        sweep_id: sweep.id,
+        type: f.type,
+        severity: f.severity,
+        product_sku: f.productSku,
+        listing_url_id: f.listingUrlId,
+        old_value: f.oldValue,
+        new_value: f.newValue,
+        rule_id: f.type,
+      })),
+    )
+    .select("id,type,severity,product_sku,listing_url_id,old_value,new_value");
   if (evErr) errors.push({ stage: "events", error: evErr.message });
+
+  // The second model call, and the last thing in the sweep.
+  //
+  // Every finding above is already written and already correct. This only
+  // adds prose to events.explanation - it cannot change which findings fired,
+  // their severity, or a single number. A failure here leaves the static
+  // per-type wording the dashboard has always shown.
+  if (written && written.length > 0) {
+    try {
+      const nameBySku = new Map(
+        (productRows ?? []).map((p) => [
+          (p as { sku: string }).sku,
+          (p as { name_canonical?: string }).name_canonical ?? (p as { sku: string }).sku,
+        ]),
+      );
+      const obsById = new Map(currentObs.map((o) => [o.listingUrlId, o]));
+
+      type EventRow = {
+        id: string;
+        type: string;
+        severity: string;
+        product_sku: string | null;
+        listing_url_id: string | null;
+        old_value: string | null;
+        new_value: string | null;
+      };
+
+      const context: FindingContext[] = (written as EventRow[]).map((e) => {
+        const obs = e.listing_url_id ? obsById.get(e.listing_url_id) : undefined;
+        // Name the thing a person would recognise: the product where the
+        // finding is about a SKU, the listing's own title where it is about
+        // one listing. A bare id would make the sentence useless.
+        const subject = e.product_sku
+          ? `${e.product_sku} — ${nameBySku.get(e.product_sku) ?? e.product_sku}`
+          : (obs?.title ?? "(listing không rõ)");
+        return {
+          id: e.id,
+          type: e.type,
+          severity: e.severity,
+          subject,
+          seller: obs?.sellerId ?? null,
+          oldValue: e.old_value,
+          newValue: e.new_value,
+        };
+      });
+
+      const { explanations, model } = await explainFindings(context);
+      for (const [id, text] of explanations) {
+        const { error } = await db
+          .from("events")
+          .update({ explanation: text, explained_by: model })
+          .eq("id", id);
+        if (error) errors.push({ stage: "explain", error: error.message });
+      }
+      if (model) {
+        console.log(`${explanations.size}/${context.length} alert(s) explained via ${model}`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.log(`alert explanations skipped: ${message}`);
+      errors.push({ stage: "explain", error: message });
+    }
+  }
 }
 console.log(`${findings.length} finding(s) from ${currentObs.length} observations`);
 

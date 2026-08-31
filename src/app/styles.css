@@ -262,3 +262,11 @@ h2.section:first-child {
 .proposal .alert-why {
   margin: 0.25rem 0 0.15rem;
 }
+
+/* A sentence written for this one finding, rather than the fixed wording for
+   its detector. Marked so the difference is visible without a legend. */
+.alert-why.written {
+  color: var(--ink);
+  border-left: 2px solid var(--accent);
+  padding-left: 0.6rem;
+}
