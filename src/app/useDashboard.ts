@@ -135,7 +135,9 @@ export function useDashboard(): State {
             .eq("sweep_id", sweep.id),
           supabase
             .from("observations")
-            .select("listing_url_id,sweep_id,observed_at,title_seen,price_vnd,units_sold")
+            .select(
+              "listing_url_id,sweep_id,observed_at,title_seen,price_vnd,units_sold,listing_urls(source_id,product_sku)",
+            )
             .in(
               "sweep_id",
               sweepHistory.map((s) => s.id),
@@ -144,7 +146,19 @@ export function useDashboard(): State {
         if (obsRes.error) throw new Error(obsRes.error.message);
         if (eventsRes.error) throw new Error(eventsRes.error.message);
         if (historyRes.error) throw new Error(historyRes.error.message);
-        history = historyRes.data as Snapshot[];
+        type HistoryJoin = Omit<Snapshot, "source_id" | "product_sku"> & {
+          listing_urls: { source_id: string; product_sku: string | null } | null;
+        };
+        history = (historyRes.data as unknown as HistoryJoin[]).map((r) => ({
+          listing_url_id: r.listing_url_id,
+          sweep_id: r.sweep_id,
+          observed_at: r.observed_at,
+          title_seen: r.title_seen,
+          price_vnd: r.price_vnd,
+          units_sold: r.units_sold,
+          source_id: r.listing_urls?.source_id ?? "?",
+          product_sku: r.listing_urls?.product_sku ?? null,
+        }));
 
         listings = (obsRes.data as unknown as ObservationJoin[]).map((o) => ({
           listing_url_id: o.listing_url_id,
