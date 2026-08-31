@@ -35,8 +35,17 @@ export function App() {
     );
   }
 
-  const { sweep, sweepHistory, history, listings, products, events, sources, urlsBySource } =
-    state.data;
+  const {
+    sweep,
+    sweepHistory,
+    history,
+    listings,
+    products,
+    events,
+    sources,
+    urlsBySource,
+    proposals,
+  } = state.data;
   const unconfiguredSources = sources.filter((s) => (urlsBySource[s.id] ?? 0) === 0).length;
   const unresolved = listings.filter((l) => l.product_sku === null).length;
 
@@ -94,7 +103,7 @@ export function App() {
       {tab === "canh-bao" && <CanhBao events={events} listings={listings} />}
       {tab === "dien-bien" && <DienBien sweepHistory={sweepHistory} history={history} />}
       {tab === "nguon" && <Nguon sources={sources} urlsBySource={urlsBySource} />}
-      {tab === "chua-khop" && <ChuaKhop listings={listings} />}
+      {tab === "chua-khop" && <ChuaKhop listings={listings} proposals={proposals} />}
 
       <footer>
         Quét mỗi giờ bằng GitHub Actions · dữ liệu đọc trực tiếp từ Supabase

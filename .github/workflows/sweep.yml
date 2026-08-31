@@ -72,7 +72,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          # Optional, and free-tier. Without it the sweep runs exactly as
+          # before and simply produces no resolution proposals.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: |
           set -u
           total="${{ inputs.iterations || '5' }}"

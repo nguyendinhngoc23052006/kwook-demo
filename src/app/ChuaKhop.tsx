@@ -1,12 +1,23 @@
 import { count, vnd } from "./format.js";
 import type { ListingRow } from "./group.js";
+import type { Proposal } from "./useDashboard.js";
 
 /**
  * Listings the resolver could not tie to a SKU. They are shown, never dropped:
  * an unresolved listing is the one place a silent miss would hide a real
  * pricing problem, so it stays visible until someone claims it.
  */
-export function ChuaKhop({ listings }: { listings: ListingRow[] }) {
+/** Below this the model is saying "a person should look at this". */
+const NEEDS_A_HUMAN = 0.6;
+
+export function ChuaKhop({
+  listings,
+  proposals,
+}: {
+  listings: ListingRow[];
+  proposals: Proposal[];
+}) {
+  const proposalFor = new Map(proposals.map((p) => [p.listing_url_id, p]));
   const unresolved = listings.filter((l) => l.product_sku === null && !l.out_of_scope);
   const outOfScope = listings.filter((l) => l.out_of_scope);
 
@@ -33,24 +44,51 @@ export function ChuaKhop({ listings }: { listings: ListingRow[] }) {
             <th>Tiêu đề quan sát được</th>
             <th className="num">Giá</th>
             <th>Nguồn</th>
+            <th>Đề xuất của mô hình</th>
           </tr>
         </thead>
         <tbody>
-          {unresolved.map((l) => (
-            <tr key={l.listing_url_id}>
-              <td>
-                {l.url ? (
-                  <a href={l.url} target="_blank" rel="noreferrer">
-                    {l.title_seen ?? "(không có tiêu đề)"}
-                  </a>
-                ) : (
-                  (l.title_seen ?? "(không có tiêu đề)")
-                )}
-              </td>
-              <td className="num">{vnd(l.price_vnd)}</td>
-              <td>{l.source_id}</td>
-            </tr>
-          ))}
+          {unresolved.map((l) => {
+            const p = proposalFor.get(l.listing_url_id);
+            const unsure = p !== undefined && (p.confidence ?? 0) < NEEDS_A_HUMAN;
+            return (
+              <tr key={l.listing_url_id}>
+                <td>
+                  {l.url ? (
+                    <a href={l.url} target="_blank" rel="noreferrer">
+                      {l.title_seen ?? "(không có tiêu đề)"}
+                    </a>
+                  ) : (
+                    (l.title_seen ?? "(không có tiêu đề)")
+                  )}
+                </td>
+                <td className="num">{vnd(l.price_vnd)}</td>
+                <td>{l.source_id}</td>
+                <td>
+                  {p === undefined ? (
+                    <span className="muted">chưa có đề xuất</span>
+                  ) : (
+                    <div className="proposal">
+                      <div>
+                        {p.proposed_sku === null ? (
+                          <strong className="warn">không khớp sku nào</strong>
+                        ) : (
+                          <strong>{p.proposed_sku}</strong>
+                        )}
+                        {p.confidence !== null && (
+                          <span className={unsure ? "badge sev-medium" : "badge"}>
+                            {Math.round(p.confidence * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      {p.reasoning && <p className="alert-why">{p.reasoning}</p>}
+                      <small className="muted">{p.model} · cần người xác nhận</small>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 

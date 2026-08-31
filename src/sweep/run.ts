@@ -6,6 +6,7 @@ import { runDetectors } from "./events.js";
 import { fetchPage } from "./fetchSource.js";
 import { parseStoreIndex } from "./parse.js";
 import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
+import { proposeResolutions } from "./propose.js";
 import { type Product, resolveByAlias } from "./resolve.js";
 import { classifyScope } from "./scope.js";
 
@@ -45,7 +46,9 @@ console.log(`sweep ${sweep.id} started`);
 
 const { data: sources } = await db.from("sources").select("*").eq("active", true);
 const { data: seeds } = await db.from("listing_urls").select("id,url,source_id");
-const { data: productRows } = await db.from("products").select("sku,aliases,reference_price_vnd");
+const { data: productRows } = await db
+  .from("products")
+  .select("sku,aliases,reference_price_vnd,name_canonical,net_weight_g,pack_format");
 const products = (productRows ?? []) as (Product & { reference_price_vnd: number | null })[];
 const referenceBySku = new Map(
   products.flatMap((p) => (p.reference_price_vnd ? [[p.sku, p.reference_price_vnd] as const] : [])),
@@ -189,6 +192,83 @@ for (const src of (sources ?? []) as Src[]) {
       .from("sources")
       .update({ consecutive_failures: fails, active: fails < 3 })
       .eq("id", src.id);
+  }
+}
+
+// The one place a model is used, and it runs LAST - only on what exact
+// matching could not place, and only on listings without a proposal already.
+// It writes an opinion with a confidence; a human confirms it. Nothing here
+// changes a price, a finding, or a product_sku.
+{
+  const { data: pending } = await db
+    .from("listing_urls")
+    .select("id, url")
+    .is("product_sku", null)
+    .eq("out_of_scope", false);
+
+  const { data: alreadyProposed } = await db.from("resolution_proposals").select("listing_url_id");
+  const seen = new Set((alreadyProposed ?? []).map((r) => r.listing_url_id as string));
+
+  const needed = (pending ?? []).filter((l) => !seen.has(l.id as string));
+
+  if (needed.length > 0) {
+    // The title as last observed - the model reads what the seller wrote.
+    const { data: obs } = await db
+      .from("observations")
+      .select("listing_url_id, title_seen, observed_at")
+      .in(
+        "listing_url_id",
+        needed.map((l) => l.id),
+      )
+      .order("observed_at", { ascending: false });
+
+    const titleFor = new Map<string, string>();
+    for (const o of (obs ?? []) as { listing_url_id: string; title_seen: string | null }[]) {
+      if (o.title_seen && !titleFor.has(o.listing_url_id)) {
+        titleFor.set(o.listing_url_id, o.title_seen);
+      }
+    }
+
+    const catalogue = (productRows ?? []).map((p) => ({
+      sku: (p as { sku: string }).sku,
+      name: (p as { name_canonical?: string }).name_canonical ?? (p as { sku: string }).sku,
+      netWeightG: (p as { net_weight_g?: number | null }).net_weight_g ?? null,
+      packFormat: (p as { pack_format?: string | null }).pack_format ?? null,
+    }));
+
+    const titles = [...titleFor.values()];
+    try {
+      const { proposals, model } = await proposeResolutions(titles, catalogue);
+      const byTitle = new Map(proposals.map((p) => [p.title, p]));
+
+      for (const [listingUrlId, title] of titleFor) {
+        const p = byTitle.get(title);
+        if (!p) continue;
+        const { error } = await db.from("resolution_proposals").upsert(
+          {
+            listing_url_id: listingUrlId,
+            sweep_id: sweep.id,
+            title_seen: title,
+            proposed_sku: p.proposed_sku,
+            confidence: p.confidence,
+            reasoning: p.reasoning,
+            model,
+          },
+          { onConflict: "listing_url_id" },
+        );
+        if (error) errors.push({ stage: "propose", error: error.message });
+      }
+      console.log(
+        `${proposals.length} resolution proposal(s) from ${titles.length} title(s)` +
+          (model ? ` via ${model}` : ""),
+      );
+    } catch (e) {
+      // A model outage must never fail a sweep: the observations are the
+      // product, the proposals are an assist.
+      const message = e instanceof Error ? e.message : String(e);
+      console.log(`resolution proposals skipped: ${message}`);
+      errors.push({ stage: "propose", error: message });
+    }
   }
 }
 

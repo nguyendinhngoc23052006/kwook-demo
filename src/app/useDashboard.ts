@@ -47,6 +47,14 @@ export type Source = {
   last_success_at: string | null;
 };
 
+export type Proposal = {
+  listing_url_id: string;
+  proposed_sku: string | null;
+  confidence: number | null;
+  reasoning: string | null;
+  model: string;
+};
+
 export type Dashboard = {
   sweep: Sweep | null;
   /** Newest first. Bounded so the page stays one small fetch, not a full archive. */
@@ -58,6 +66,8 @@ export type Dashboard = {
   sources: Source[];
   /** How many entry-point URLs each source has. Zero means nothing to fetch. */
   urlsBySource: Record<string, number>;
+  /** Model proposals for listings exact matching could not place. */
+  proposals: Proposal[];
 };
 
 /**
@@ -113,17 +123,21 @@ export function useDashboard(): State {
 
       // Products and sources describe the setup, so they load even with no sweep
       // yet — that empty state should still show what is being watched.
-      const [productsRes, sourcesRes, urlsRes] = await Promise.all([
+      const [productsRes, sourcesRes, urlsRes, proposalsRes] = await Promise.all([
         supabase.from("products").select("sku,name_canonical,reference_price_vnd"),
         supabase
           .from("sources")
           .select("id,display_name,domain,active,consecutive_failures,last_success_at")
           .order("id"),
         supabase.from("listing_urls").select("source_id"),
+        supabase
+          .from("resolution_proposals")
+          .select("listing_url_id,proposed_sku,confidence,reasoning,model"),
       ]);
       if (productsRes.error) throw new Error(productsRes.error.message);
       if (sourcesRes.error) throw new Error(sourcesRes.error.message);
       if (urlsRes.error) throw new Error(urlsRes.error.message);
+      if (proposalsRes.error) throw new Error(proposalsRes.error.message);
 
       const urlsBySource: Record<string, number> = {};
       for (const row of urlsRes.data as { source_id: string }[]) {
@@ -201,6 +215,7 @@ export function useDashboard(): State {
             events,
             sources: sourcesRes.data as Source[],
             urlsBySource,
+            proposals: proposalsRes.data as Proposal[],
           },
         });
       }
