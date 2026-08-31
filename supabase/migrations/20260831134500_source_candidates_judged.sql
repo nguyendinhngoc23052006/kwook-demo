@@ -19,9 +19,13 @@
 -- It goes rather than staying as a permanently priceless row. A source table
 -- that lists things which never worked teaches the reader to distrust the
 -- ones that do.
--- observations first: they hold a foreign key to the listing. The rows being
+-- Dependents first - events and observations both hold a foreign key to the
+-- listing. The rows being
 -- removed carry a null price and a blog headline, so nothing observed about
--- any actual price is lost - only the record of having fetched an article.
+-- any actual price is lost. The one event was a "new_seller" notice for a
+-- seller that turns out not to sell anything on that page.
+delete from events
+ where listing_url_id in (select id from listing_urls where source_id = 'newfresh');
 delete from observations
  where listing_url_id in (select id from listing_urls where source_id = 'newfresh');
 delete from resolution_proposals
