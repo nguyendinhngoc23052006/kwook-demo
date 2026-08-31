@@ -7,6 +7,7 @@ import { fetchPage } from "./fetchSource.js";
 import { parseStoreIndex } from "./parse.js";
 import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
 import { type Product, resolveByAlias } from "./resolve.js";
+import { classifyScope } from "./scope.js";
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SECRET_KEY;
@@ -70,7 +71,10 @@ for (const src of (sources ?? []) as Src[]) {
         const productUrl = p.url ?? `${entry.url}#${p.title}`;
         // Alias-first, zero tokens. A miss leaves product_sku null and the
         // listing lands in the unresolved queue rather than being guessed at.
-        const hit = resolveByAlias(p.title, products);
+        // A listing naming another brand can never match a Kwook SKU, so it
+        // is marked rather than left to sit in the queue forever.
+        const scope = classifyScope(p.title);
+        const hit = scope.outOfScope ? null : resolveByAlias(p.title, products);
         const { data: row, error: urlErr } = await db
           .from("listing_urls")
           .upsert(
@@ -81,6 +85,8 @@ for (const src of (sources ?? []) as Src[]) {
               product_sku: hit?.sku ?? null,
               resolve_confidence: hit?.confidence ?? null,
               resolved_by: hit?.method ?? null,
+              out_of_scope: scope.outOfScope,
+              out_of_scope_brand: scope.outOfScope ? scope.brand : null,
             },
             { onConflict: "url" },
           )
