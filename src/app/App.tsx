@@ -1,48 +1,102 @@
-import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabaseClient.js";
+import { useState } from "react";
+import { usingBuiltInConfig } from "../lib/supabaseClient.js";
+import { BangGia } from "./BangGia.js";
+import { CanhBao } from "./CanhBao.js";
+import { ChuaKhop } from "./ChuaKhop.js";
+import { count, when } from "./format.js";
+import { Nguon } from "./Nguon.js";
+import "./styles.css";
+import { useDashboard } from "./useDashboard.js";
 
-type Sweep = {
-  id: string;
-  started_at: string;
-  finished_at: string | null;
-  sources_ok: number;
-  sources_attempted: number;
-  listings_observed: number;
-};
+type Tab = "gia" | "canh-bao" | "nguon" | "chua-khop";
 
 export function App() {
-  const [sweep, setSweep] = useState<Sweep | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>("gia");
+  const state = useDashboard();
 
-  useEffect(() => {
-    supabase
-      .from("sweeps")
-      .select("id,started_at,finished_at,sources_ok,sources_attempted,listings_observed")
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setSweep(data as Sweep | null);
-        setLoading(false);
-      });
-  }, []);
+  if (state.status === "loading") {
+    return (
+      <div className="shell">
+        <Masthead />
+        <p className="empty">Đang tải…</p>
+      </div>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <div className="shell">
+        <Masthead />
+        <p className="empty" role="alert">
+          Không đọc được dữ liệu: {state.message}
+        </p>
+      </div>
+    );
+  }
+
+  const { sweep, listings, products, events, sources } = state.data;
+  const unresolved = listings.filter((l) => l.product_sku === null).length;
+
+  const tabs: { id: Tab; label: string; pip?: number }[] = [
+    { id: "gia", label: "Bảng giá" },
+    { id: "canh-bao", label: "Cảnh báo", pip: events.length },
+    { id: "nguon", label: "Nguồn", pip: sources.filter((s) => !s.active).length },
+    { id: "chua-khop", label: "Chưa khớp", pip: unresolved },
+  ];
 
   return (
-    <main>
+    <div className="shell">
+      <Masthead />
+
+      <div className="sweepbar">
+        {sweep === null ? (
+          <span>Chưa có lượt quét nào — lượt đầu tiên sẽ chạy vào đầu giờ kế tiếp.</span>
+        ) : (
+          <>
+            <span>
+              Lượt quét gần nhất: <strong>{when(sweep.started_at)}</strong>
+            </span>
+            <span>
+              <strong>
+                {sweep.sources_ok}/{sweep.sources_attempted}
+              </strong>{" "}
+              nguồn OK
+            </span>
+            <span>
+              <strong>{count(sweep.listings_observed)}</strong> listing
+            </span>
+            {sweep.finished_at === null && <span className="warn">đang chạy…</span>}
+          </>
+        )}
+      </div>
+
+      <nav>
+        {tabs.map((t) => (
+          <button key={t.id} type="button" aria-current={tab === t.id} onClick={() => setTab(t.id)}>
+            {t.label}
+            {t.pip !== undefined && t.pip > 0 && <span className="pip">{t.pip}</span>}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "gia" && <BangGia listings={listings} products={products} />}
+      {tab === "canh-bao" && <CanhBao events={events} listings={listings} />}
+      {tab === "nguon" && <Nguon sources={sources} />}
+      {tab === "chua-khop" && <ChuaKhop listings={listings} />}
+
+      <footer>
+        Quét mỗi giờ bằng GitHub Actions · dữ liệu đọc trực tiếp từ Supabase
+        {usingBuiltInConfig && " · dùng cấu hình mặc định trong bundle"}
+      </footer>
+    </div>
+  );
+}
+
+function Masthead() {
+  return (
+    <header className="masthead">
       <h1>GIÁ SÀN</h1>
-      <p>Theo dõi giá kênh — Kwook Việt Nam</p>
-      {loading && <p>Đang tải…</p>}
-      {error && <p role="alert">Lỗi: {error}</p>}
-      {!loading && !error && !sweep && <p>Chưa có lượt quét nào.</p>}
-      {sweep && (
-        <p>
-          Quét lúc {new Date(sweep.started_at).toLocaleString("vi-VN")} · {sweep.sources_ok}/
-          {sweep.sources_attempted} nguồn OK · {sweep.listings_observed} listing
-          {!sweep.finished_at && " · đang chạy"}
-        </p>
-      )}
-    </main>
+      <p>Theo dõi tính toàn vẹn giá kênh — Kwook Việt Nam</p>
+    </header>
   );
 }

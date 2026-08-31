@@ -32,3 +32,8 @@ export function normalizeTitle(raw: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/** Group thousands the Vietnamese way: 120000 → "120.000". */
+export function formatVnd(n: number): string {
+  return n.toLocaleString("vi-VN");
+}

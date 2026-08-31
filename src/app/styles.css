@@ -1,0 +1,243 @@
+:root {
+  --ink: #14161a;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --bg: #fbfbfc;
+  --bad: #b42318;
+  --warn: #b54708;
+  --ok: #067647;
+  --accent: #0b5cad;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    15px / 1.5 system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+
+.shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+
+.masthead {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.masthead h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+.masthead p {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+}
+
+.sweepbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+  margin-bottom: 1.25rem;
+}
+.sweepbar strong {
+  color: var(--ink);
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+}
+nav button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+}
+nav button[aria-current="true"] {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+nav button .pip {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: #0002;
+  font-size: 0.78rem;
+}
+nav button[aria-current="true"] .pip {
+  background: #fff3;
+}
+
+.sku {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+.sku > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.sku h2 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+.sku code {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.spread {
+  text-align: right;
+}
+.spread > span {
+  font-weight: 600;
+}
+.spread small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+th,
+td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+}
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+a {
+  color: var(--accent);
+}
+
+.alerts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+.alerts li {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--muted);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+}
+.alerts li.sev-high {
+  border-left-color: var(--bad);
+}
+.alerts li.sev-medium {
+  border-left-color: var(--warn);
+}
+.alert-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+.alert-subject {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.alert-values {
+  margin-top: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.alert-why {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.87rem;
+}
+.badge {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: #0001;
+}
+.badge.sev-high {
+  background: #fee4e2;
+  color: var(--bad);
+}
+.badge.sev-medium {
+  background: #fef0c7;
+  color: var(--warn);
+}
+
+.summary {
+  color: var(--muted);
+  margin: 0 0 0.9rem;
+}
+.empty {
+  color: var(--muted);
+  background: #fff;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+.bad {
+  color: var(--bad);
+}
+.warn {
+  color: var(--warn);
+}
+.ok {
+  color: var(--ok);
+}
+.muted {
+  color: var(--muted);
+}
+
+footer {
+  margin-top: 2rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
