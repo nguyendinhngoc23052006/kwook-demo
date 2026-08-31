@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { byVersionDesc, proposeResolutions, replacementFrom } from "./propose.js";
+import { byVersionDesc, decide, proposeResolutions, replacementFrom } from "./propose.js";
 
 const saved = process.env.GEMINI_API_KEY;
 afterEach(() => {
@@ -67,5 +67,29 @@ describe("replacementFrom", () => {
 
   it("returns null when the error names no successor, so the sweep reports it", () => {
     expect(replacementFrom('{"error":{"code":404,"message":"not found"}}')).toBeNull();
+  });
+});
+
+describe("decide", () => {
+  it("treats 503 as retryable, which is what actually happened", () => {
+    // Verbatim cause of the second failed sweep: the newest model is also the
+    // busiest. "High demand" is not a reason to lose an hour of proposals.
+    expect(decide(503)).toBe("retry");
+  });
+
+  it("treats 429 as retryable too", () => {
+    expect(decide(429)).toBe("retry");
+  });
+
+  it("moves to the next candidate on a 404, rather than retrying a retired model", () => {
+    expect(decide(404)).toBe("next");
+  });
+
+  it("does not retry a bad request, which would fail identically forever", () => {
+    expect(decide(400)).toBe("next");
+  });
+
+  it("accepts any 2xx", () => {
+    expect(decide(200)).toBe("ok");
   });
 });
