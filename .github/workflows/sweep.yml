@@ -2,7 +2,16 @@ name: sweep
 
 on:
   schedule:
-    - cron: "0 * * * *"   # hourly; GitHub may skip some hours under load
+    # NOT on the hour. GitHub documents that the schedule event is delayed
+    # under load and that queued jobs may be DROPPED, with load concentrated
+    # at the start of each hour - so it recommends a different minute.
+    # Verified: 2026-08-31, docs/actions "Events that trigger workflows".
+    #
+    # Running at :17 and :47 is the hedge: two chances an hour, neither in the
+    # contended slot, so a dropped run costs half an hour instead of the whole
+    # day. Minutes are free and unmetered on a public repo, so the only cost
+    # of the second run is a row in the sweep log.
+    - cron: "17,47 * * * *"
   workflow_dispatch:
 
 concurrency:
