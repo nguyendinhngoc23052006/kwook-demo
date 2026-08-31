@@ -5,7 +5,7 @@ import type { Observation } from "./detect.js";
 import { runDetectors } from "./events.js";
 import { fetchPage } from "./fetchSource.js";
 import { parseStoreIndex } from "./parse.js";
-import { parseProductPage } from "./parseProduct.js";
+import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
 import { type Product, resolveByAlias } from "./resolve.js";
 
 const url = process.env.SUPABASE_URL;
@@ -55,12 +55,12 @@ for (const src of (sources ?? []) as Src[]) {
       errors.push({ source: src.id, url: entry.url, error: res.error });
       continue;
     }
-    ok = true;
 
     await mkdir("fixtures/raw", { recursive: true });
     await writeFile(`fixtures/raw/${src.id}.html`, res.html, "utf8");
 
     if (src.fetch_strategy === "store_index") {
+      ok = true;
       // One fetch, many products - each gets its own listing_urls row so the
       // per-listing history the detectors need is actually per listing.
       const parsed = parseStoreIndex(res.html);
@@ -113,6 +113,16 @@ for (const src of (sources ?? []) as Src[]) {
       // per-site scraper. Raw HTML is still stored: when the parser finds
       // nothing, that excerpt is the only way to see why.
       const p = parseProductPage(res.html);
+
+      // A bot check that answered 200 is not a successful fetch. Recording it
+      // as one leaves the source looking healthy while it returns nothing.
+      if (looksLikeChallenge(res.html, p)) {
+        console.log(`${src.id}: BLOCKED ${entry.url} - challenge page ("${p.title}")`);
+        errors.push({ source: src.id, url: entry.url, error: `challenge page: ${p.title}` });
+        continue;
+      }
+      ok = true;
+
       console.log(
         `${src.id}: ${entry.url} -> ${p.priceVnd ?? "no price"} (${p.method ?? "no structured markup"})`,
       );

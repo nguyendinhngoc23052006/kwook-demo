@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePriceLoose, parseProductPage } from "./parseProduct.js";
+import { looksLikeChallenge, parsePriceLoose, parseProductPage } from "./parseProduct.js";
 
 describe("parsePriceLoose", () => {
   it("reads a machine decimal as a decimal, not as grouped thousands", () => {
@@ -119,5 +119,95 @@ describe("parseProductPage", () => {
       '<meta property="og:price:amount" content="99000"></head>',
     );
     expect(parseProductPage(html).priceVnd).toBe(99_000);
+  });
+});
+
+// Reproduces abby.vn's real shape: a header cart total of 0 đ, then a
+// DIFFERENT product's price block, and only then the product's own heading
+// and price. Both decoys precede the real one in the document.
+const wooPage = (priceBlock: string) => `
+<html><body>
+  <span class="woocommerce-Price-amount amount"><bdi>0&nbsp;<span class="woocommerce-Price-currencySymbol">&#8363;</span></bdi></span>
+  <div class="related">
+    <p class="price"><span class="woocommerce-Price-amount amount"><bdi>135.000&nbsp;<span>&#8363;</span></bdi></span></p>
+  </div>
+  <h1 class="product_title entry-title elementor-heading-title">Lá rong biển Kwook (10 lá)</h1>
+  <div class="elementor-widget-container">${priceBlock}</div>
+</body></html>`;
+
+describe("parseProductPage on WooCommerce", () => {
+  it("takes the price after the product heading, not the cart total or a related product", () => {
+    const out = parseProductPage(
+      wooPage(
+        '<p class="price"><span class="woocommerce-Price-amount amount"><bdi>34.560&nbsp;<span class="woocommerce-Price-currencySymbol">&#8363;</span></bdi></span><br/><small>(Giá khu vực )</small></p>',
+      ),
+    );
+    expect(out).toMatchObject({
+      title: "Lá rong biển Kwook (10 lá)",
+      priceVnd: 34_560,
+      method: "woocommerce",
+    });
+    expect(out.priceVnd).not.toBe(0);
+    expect(out.priceVnd).not.toBe(135_000);
+  });
+
+  it("takes the sale price, not the struck-through one", () => {
+    const out = parseProductPage(
+      wooPage(
+        '<p class="price"><del><span class="woocommerce-Price-amount amount"><bdi>50.000&nbsp;<span>&#8363;</span></bdi></span></del> <ins><span class="woocommerce-Price-amount amount"><bdi>34.560&nbsp;<span>&#8363;</span></bdi></span></ins></p>',
+      ),
+    );
+    expect(out).toMatchObject({ priceVnd: 34_560, originalPriceVnd: 50_000 });
+  });
+
+  it("reads Vietnamese grouping, so 42.120 is not 42", () => {
+    const out = parseProductPage(
+      wooPage(
+        '<p class="price"><span class="woocommerce-Price-amount amount"><bdi>42.120&nbsp;<span>&#8363;</span></bdi></span></p>',
+      ),
+    );
+    expect(out.priceVnd).toBe(42_120);
+  });
+
+  it("returns no price when the heading has no price block after it", () => {
+    const out = parseProductPage(
+      '<h1 class="product_title">Sản phẩm</h1><div>Liên hệ để biết giá</div>',
+    );
+    expect(out.priceVnd).toBeNull();
+    expect(out.method).toBeNull();
+  });
+
+  it("prefers JSON-LD when a page offers both", () => {
+    const html = wooPage(
+      '<p class="price"><span class="woocommerce-Price-amount amount"><bdi>34.560&nbsp;<span>&#8363;</span></bdi></span></p>',
+    ).replace(
+      "<body>",
+      `<body><script type="application/ld+json">${JSON.stringify({ "@type": "Product", name: "x", offers: { price: "99000" } })}</script>`,
+    );
+    expect(parseProductPage(html)).toMatchObject({ priceVnd: 99_000, method: "json-ld" });
+  });
+});
+
+describe("looksLikeChallenge", () => {
+  const small = "<html><head><title>Just a moment… — OnePanel</title></head></html>";
+
+  it("flags a tiny interstitial that answered 200", () => {
+    expect(looksLikeChallenge(small, parseProductPage(small))).toBe(true);
+  });
+
+  it("does not flag a real page that simply has no price", () => {
+    const html = "<html><head><title>Rong biển Kwook 50g</title></head></html>";
+    expect(looksLikeChallenge(html, parseProductPage(html))).toBe(false);
+  });
+
+  it("does not flag a page that produced a price", () => {
+    const html = `<html><head><title>Just a moment…</title>
+      <meta property="og:price:amount" content="42000"></head></html>`;
+    expect(looksLikeChallenge(html, parseProductPage(html))).toBe(false);
+  });
+
+  it("does not flag a large page, since a challenge is never large", () => {
+    const html = `${small}${"x".repeat(60_000)}`;
+    expect(looksLikeChallenge(html, parseProductPage(html))).toBe(false);
   });
 });

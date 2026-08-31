@@ -6,7 +6,7 @@ export type ParsedProduct = {
   originalPriceVnd: number | null;
   brandString: string | null;
   /** Which extraction path produced the price — recorded so a wrong one is findable. */
-  method: "json-ld" | "meta" | null;
+  method: "json-ld" | "meta" | "woocommerce" | null;
 };
 
 /**
@@ -98,6 +98,47 @@ function decodeEntities(s: string): string {
 }
 
 /**
+ * WooCommerce, anchored on the product heading rather than on the first price
+ * in the document.
+ *
+ * That anchor is the whole point. A product page carries prices for the cart
+ * widget, related products and upsells; on abby.vn the FIRST
+ * `woocommerce-Price-amount` is the header cart total, rendered as `0 ₫`, and
+ * the first `class="price"` belongs to a different product entirely — it sits
+ * ~9,000 characters before the real one. Taking either would record a
+ * confidently wrong number. WooCommerce core always emits
+ * `<h1 class="product_title …>` followed by the product's own `<p class="price">`,
+ * so the heading is what makes the price identifiable.
+ */
+function parseWooCommerce(html: string): ParsedProduct | null {
+  const titleMatch = /<h1[^>]*class="[^"]*product_title[^"]*"[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+  if (!titleMatch) return null;
+
+  const after = html.slice(titleMatch.index, titleMatch.index + 6000);
+  const block = /<p[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(after)?.[1];
+  if (!block) return null;
+
+  const amounts = [...block.matchAll(/woocommerce-Price-amount[^>]*>\s*<bdi>\s*([\d.,]+)/gi)].map(
+    (m) => parsePriceLoose(m[1]),
+  );
+  const found = amounts.filter((n): n is number => n !== null);
+  if (found.length === 0) return null;
+
+  // A sale renders <del>old</del><ins>new</ins>: the LAST amount is what the
+  // buyer pays. With no <del> there is one amount and it is the price.
+  const onSale = /<del[\s>]/i.test(block);
+  const price = onSale ? (found.at(-1) ?? null) : (found[0] ?? null);
+
+  return {
+    title: decodeEntities(titleMatch[1]?.replace(/<[^>]*>/g, "") ?? "") || null,
+    priceVnd: price,
+    originalPriceVnd: onSale && found.length > 1 ? (found[0] ?? null) : null,
+    brandString: null,
+    method: "woocommerce",
+  };
+}
+
+/**
  * Read one product page without knowing the site.
  *
  * Structured markup first, because JSON-LD and OpenGraph are what Vietnamese
@@ -134,6 +175,9 @@ export function parseProductPage(html: string): ParsedProduct {
     };
   }
 
+  const woo = parseWooCommerce(html);
+  if (woo?.priceVnd != null) return woo;
+
   const metaPrice = parsePriceLoose(
     metaContent(html, "product:price:amount") ?? metaContent(html, "og:price:amount"),
   );
@@ -147,4 +191,27 @@ export function parseProductPage(html: string): ParsedProduct {
     brandString: metaContent(html, "product:brand"),
     method: metaPrice === null ? null : "meta",
   };
+}
+
+/**
+ * A bot check that answered 200.
+ *
+ * kwookvietnam.com.vn returns an interstitial titled "Just a moment…" with a
+ * 200 status, so the fetch succeeds, the source is recorded as healthy, and
+ * an observation with no price is stored forever. A block that reports itself
+ * as success is worse than an error: nothing ever surfaces it. These pages
+ * are always tiny and always carry a known holding title.
+ */
+export function looksLikeChallenge(html: string, parsed: ParsedProduct): boolean {
+  if (parsed.priceVnd !== null) return false;
+  if (html.length > 50_000) return false;
+  const title = (parsed.title ?? "").toLowerCase();
+  return [
+    "just a moment",
+    "checking your browser",
+    "attention required",
+    "verifying you are human",
+    "ddos-guard",
+    "access denied",
+  ].some((needle) => title.includes(needle));
 }
