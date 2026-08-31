@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { askForJson } from "./gemini.js";
 
 /**
- * Where the model earns its place, and nowhere else.
+ * Where the model earns its place on the RESOLVER, and nowhere else.
  *
  * Everything upstream of this file is deterministic: regex parsing, exact
  * alias matching, threshold comparisons. That is deliberate — those jobs have
@@ -26,40 +27,19 @@ import { z } from "zod";
  *  - It is allowed to REFUSE. null with a reason is a correct answer, and for
  *    a title naming two pack sizes it is the ONLY correct answer. A model that
  *    always guesses would be worse than the exact matcher it supplements.
- *
- * Gemini over the REST API, on the free tier: the whole project is built to
- * run without a paid subscription, and this is the last place that could have
- * quietly broken that.
  */
-
-const API = "https://generativelanguage.googleapis.com/v1beta";
-
-/** How many models to try before giving up. Enough to skip a busy newest. */
-const MAX_CANDIDATES = 4;
-const RETRY_DELAY_MS = 2_000;
-
-/**
- * What to do about an HTTP status, kept separate so the policy is testable
- * without a network.
- *
- * 429 and 503 mean "busy, not broken" - the newest model is also the most
- * contended, and this classification is not urgent enough to justify failing
- * an hour of proposals over a spike.
- */
-export function decide(status: number): "ok" | "retry" | "next" {
-  if (status >= 200 && status < 300) return "ok";
-  if (status === 429 || status === 503) return "retry";
-  return "next";
-}
 
 /** The model's JSON is untrusted input like any other. Validate, never assume. */
-const Proposal = z.object({
-  title: z.string(),
-  proposed_sku: z.string().nullish(),
-  confidence: z.number().min(0).max(1),
-  reasoning: z.string(),
+const ProposalSet = z.object({
+  proposals: z.array(
+    z.object({
+      title: z.string(),
+      proposed_sku: z.string().nullish(),
+      confidence: z.number().min(0).max(1),
+      reasoning: z.string(),
+    }),
+  ),
 });
-const ProposalSet = z.object({ proposals: z.array(Proposal) });
 
 export type Proposal = {
   title: string;
@@ -75,67 +55,6 @@ export type CatalogueEntry = {
   packFormat: string | null;
 };
 
-/**
- * Which model to use is DISCOVERED, not hardcoded.
- *
- * Gemini's model names change faster than this repo will, and a stale literal
- * fails at 3am inside a scheduled job with a 404 that reads like a bug. So the
- * sweep asks the API what it can actually call, and prefers a lightweight
- * model since the task is short classification. GEMINI_MODEL overrides when
- * you want a specific one.
- */
-export async function listModels(apiKey: string): Promise<string[]> {
-  const override = process.env.GEMINI_MODEL;
-  if (override) return [override];
-
-  const res = await fetch(`${API}/models?key=${apiKey}&pageSize=200`);
-  if (!res.ok) throw new Error(`listing models failed: HTTP ${res.status}`);
-
-  const body = (await res.json()) as {
-    models?: { name?: string; supportedGenerationMethods?: string[] }[];
-  };
-  const usable = (body.models ?? [])
-    .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
-    .map((m) => (m.name ?? "").replace(/^models\//, ""))
-    // Exclude previews and experiments: a scheduled job should not ride a
-    // model that can be withdrawn without notice.
-    .filter((n) => n !== "" && !n.includes("exp") && !n.includes("preview"));
-
-  const flash = usable.filter((n) => n.includes("flash"));
-  return (flash.length > 0 ? flash : usable).sort(byVersionDesc);
-}
-
-/**
- * Newest first, compared NUMERICALLY.
- *
- * Sorting these names as strings is wrong twice over. Ascending picked
- * gemini-2.5-flash, which ListModels still advertises but which the API
- * refuses for new keys - "no longer available to new users" - so the sweep
- * 404'd on a model the catalogue said it could call. And lexical order puts
- * "10" before "2", so a string sort breaks again the moment a version
- * reaches double digits.
- */
-export function byVersionDesc(a: string, b: string): number {
-  const version = (n: string): [number, number] => {
-    const m = /(\d+)(?:\.(\d+))?/.exec(n);
-    return [Number(m?.[1] ?? 0), Number(m?.[2] ?? 0)];
-  };
-  const [aMajor, aMinor] = version(a);
-  const [bMajor, bMinor] = version(b);
-  return bMajor - aMajor || bMinor - aMinor || a.localeCompare(b);
-}
-
-/**
- * Gemini's 404 for a retired model names its replacement in prose:
- * "Please update your code to use models/gemini-3.6-flash". That is the most
- * authoritative pointer available at runtime, so one retry against it beats
- * failing the sweep and waiting for a human to read the log.
- */
-export function replacementFrom(errorBody: string): string | null {
-  const m = /use\s+models\/([A-Za-z0-9.\-_]+)/.exec(errorBody);
-  return m?.[1] ?? null;
-}
-
 const SYSTEM = `Bạn giúp đối chiếu listing trên sàn thương mại điện tử Việt Nam với danh mục sản phẩm của Kwook Việt Nam (rong biển và thực phẩm Hàn Quốc).
 
 Với mỗi tiêu đề listing, chọn ĐÚNG MỘT sku trong danh mục, hoặc trả về null.
@@ -150,7 +69,6 @@ Quy tắc bắt buộc:
 Trả lời cho MỌI tiêu đề được đưa vào, copy nguyên văn tiêu đề vào trường title.
 Lý do viết bằng tiếng Việt, một câu, nêu bằng chứng trong tiêu đề.`;
 
-/** OpenAPI-subset schema; Gemini constrains decoding to it. */
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -169,7 +87,7 @@ const RESPONSE_SCHEMA = {
     },
   },
   required: ["proposals"],
-} as const;
+};
 
 /**
  * Ask for a proposal per unresolved title. Returns [] when no key is set, so
@@ -180,16 +98,9 @@ export async function proposeResolutions(
   catalogue: CatalogueEntry[],
 ): Promise<{ proposals: Proposal[]; model: string }> {
   if (titles.length === 0) return { proposals: [], model: "" };
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!process.env.GEMINI_API_KEY) {
     console.log("no GEMINI_API_KEY: skipping model-assisted resolution");
     return { proposals: [], model: "" };
-  }
-
-  const candidates = await listModels(apiKey);
-  if (candidates.length === 0) {
-    throw new Error("no Gemini model supports generateContent for this key");
   }
 
   const catalogueText = catalogue
@@ -199,83 +110,18 @@ export async function proposeResolutions(
     )
     .join("\n");
 
-  const request = {
-    method: "POST" as const,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM }] },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `DANH MỤC SẢN PHẨM:\n${catalogueText}\n\nCÁC TIÊU ĐỀ CHƯA KHỚP:\n${titles.map((t) => `- ${t}`).join("\n")}`,
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-        temperature: 0,
-      },
-    }),
-  };
-
-  // Walk the candidates newest-first. The newest model is also the busiest,
-  // so "high demand" on it is not a reason to give up on the whole step when
-  // the previous generation is sitting there idle and equally capable of
-  // this classification.
-  const queue = [...candidates.slice(0, MAX_CANDIDATES)];
-  const failures: string[] = [];
-  let used = "";
-  let res: Response | undefined;
-
-  while (queue.length > 0) {
-    const model = queue.shift();
-    if (!model) break;
-    used = model;
-
-    let attempt = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
-
-    // 503/429 are transient by definition. One short wait costs less than
-    // losing the proposals for an hour.
-    if (decide(attempt.status) === "retry") {
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      attempt = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
-    }
-
-    if (attempt.ok) {
-      res = attempt;
-      break;
-    }
-
-    const detail = await attempt.text();
-    failures.push(`${used}: HTTP ${attempt.status} ${detail.slice(0, 160)}`);
-
-    // A retirement 404 names its replacement; that pointer beats our ordering.
-    const replacement = attempt.status === 404 ? replacementFrom(detail) : null;
-    if (replacement && !queue.includes(replacement)) queue.unshift(replacement);
-  }
-
-  if (!res) {
-    throw new Error(`gemini: every candidate failed - ${failures.join(" | ")}`);
-  }
-
-  const body = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const text = body.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error(`gemini ${used}: response carried no text`);
-
-  const parsed = ProposalSet.safeParse(JSON.parse(text));
-  if (!parsed.success) {
-    throw new Error(`gemini ${used}: response failed validation - ${parsed.error.message}`);
-  }
+  const { data, model } = await askForJson(
+    {
+      system: SYSTEM,
+      user: `DANH MỤC SẢN PHẨM:\n${catalogueText}\n\nCÁC TIÊU ĐỀ CHƯA KHỚP:\n${titles.map((t) => `- ${t}`).join("\n")}`,
+      schema: RESPONSE_SCHEMA,
+    },
+    ProposalSet,
+  );
 
   return {
-    model: used,
-    proposals: parsed.data.proposals.map((p) => ({
+    model,
+    proposals: data.proposals.map((p) => ({
       title: p.title,
       proposed_sku: p.proposed_sku ?? null,
       confidence: p.confidence,

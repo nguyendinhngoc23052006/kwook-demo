@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { byVersionDesc, decide, proposeResolutions, replacementFrom } from "./propose.js";
+import { byVersionDesc, decide, replacementFrom } from "./gemini.js";
+import { proposeResolutions } from "./propose.js";
 
 const saved = process.env.GEMINI_API_KEY;
 afterEach(() => {

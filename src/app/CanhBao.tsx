@@ -2,7 +2,14 @@ import { count } from "./format.js";
 import type { ListingRow } from "./group.js";
 import type { EventRow } from "./useDashboard.js";
 
-/** What each detector means in the seller's own terms, not the code's. */
+/**
+ * The fallback wording: what each detector means, in the seller's terms.
+ *
+ * Used when a finding has no model-written explanation - no key, an outage,
+ * or the model declining to say anything useful about that row. It is the
+ * same sentence for every finding of a type, which is exactly why the
+ * per-finding version exists.
+ */
 const LABELS: Record<string, { title: string; why: string }> = {
   self_cannibalization: {
     title: "Tự cạnh tranh giá",
@@ -79,7 +86,16 @@ export function CanhBao({ events, listings }: { events: EventRow[]; listings: Li
               <div className="alert-values">
                 {e.old_value} → <strong>{e.new_value}</strong>
               </div>
-              {label && <p className="alert-why">{label.why}</p>}
+              {/* The model's sentence when there is one, the fixed
+                  per-detector sentence when there is not. A sweep that ran
+                  without a model looks exactly like it always did. */}
+              {e.explanation ? (
+                <p className="alert-why written" title={`viết bởi ${e.explained_by ?? "mô hình"}`}>
+                  {e.explanation}
+                </p>
+              ) : (
+                label && <p className="alert-why">{label.why}</p>
+              )}
             </li>
           );
         })}
