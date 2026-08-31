@@ -83,12 +83,41 @@ export async function pickModel(apiKey: string): Promise<string> {
     // model that can be withdrawn without notice.
     .filter((n) => n !== "" && !n.includes("exp") && !n.includes("preview"));
 
-  // Flash-family models are the free tier's workhorses and this task is a
-  // short classification, not an essay.
-  const flash = usable.filter((n) => n.includes("flash")).sort();
-  const chosen = flash[0] ?? usable[0];
+  const flash = usable.filter((n) => n.includes("flash"));
+  const chosen = (flash.length > 0 ? flash : usable).sort(byVersionDesc)[0];
   if (!chosen) throw new Error("no Gemini model supports generateContent for this key");
   return chosen;
+}
+
+/**
+ * Newest first, compared NUMERICALLY.
+ *
+ * Sorting these names as strings is wrong twice over. Ascending picked
+ * gemini-2.5-flash, which ListModels still advertises but which the API
+ * refuses for new keys - "no longer available to new users" - so the sweep
+ * 404'd on a model the catalogue said it could call. And lexical order puts
+ * "10" before "2", so a string sort breaks again the moment a version
+ * reaches double digits.
+ */
+export function byVersionDesc(a: string, b: string): number {
+  const version = (n: string): [number, number] => {
+    const m = /(\d+)(?:\.(\d+))?/.exec(n);
+    return [Number(m?.[1] ?? 0), Number(m?.[2] ?? 0)];
+  };
+  const [aMajor, aMinor] = version(a);
+  const [bMajor, bMinor] = version(b);
+  return bMajor - aMajor || bMinor - aMinor || a.localeCompare(b);
+}
+
+/**
+ * Gemini's 404 for a retired model names its replacement in prose:
+ * "Please update your code to use models/gemini-3.6-flash". That is the most
+ * authoritative pointer available at runtime, so one retry against it beats
+ * failing the sweep and waiting for a human to read the log.
+ */
+export function replacementFrom(errorBody: string): string | null {
+  const m = /use\s+models\/([A-Za-z0-9.\-_]+)/.exec(errorBody);
+  return m?.[1] ?? null;
 }
 
 const SYSTEM = `Bạn giúp đối chiếu listing trên sàn thương mại điện tử Việt Nam với danh mục sản phẩm của Kwook Việt Nam (rong biển và thực phẩm Hàn Quốc).
@@ -150,8 +179,8 @@ export async function proposeResolutions(
     )
     .join("\n");
 
-  const res = await fetch(`${API}/models/${model}:generateContent?key=${apiKey}`, {
-    method: "POST",
+  const request = {
+    method: "POST" as const,
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM }] },
@@ -171,25 +200,37 @@ export async function proposeResolutions(
         temperature: 0,
       },
     }),
-  });
+  };
+
+  let used = model;
+  let res = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+
+  if (res.status === 404) {
+    const detail = await res.text();
+    const replacement = replacementFrom(detail);
+    if (!replacement) throw new Error(`gemini ${used}: HTTP 404 ${detail.slice(0, 300)}`);
+    console.log(`gemini: ${used} is retired, retrying with ${replacement}`);
+    used = replacement;
+    res = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+  }
 
   if (!res.ok) {
-    throw new Error(`gemini ${model}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+    throw new Error(`gemini ${used}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
   }
 
   const body = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   };
   const text = body.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error(`gemini ${model}: response carried no text`);
+  if (!text) throw new Error(`gemini ${used}: response carried no text`);
 
   const parsed = ProposalSet.safeParse(JSON.parse(text));
   if (!parsed.success) {
-    throw new Error(`gemini ${model}: response failed validation - ${parsed.error.message}`);
+    throw new Error(`gemini ${used}: response failed validation - ${parsed.error.message}`);
   }
 
   return {
-    model,
+    model: used,
     proposals: parsed.data.proposals.map((p) => ({
       title: p.title,
       proposed_sku: p.proposed_sku ?? null,
