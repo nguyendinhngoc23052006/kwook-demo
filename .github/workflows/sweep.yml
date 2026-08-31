@@ -20,7 +20,18 @@ on:
 
 concurrency:
   group: sweep
-  cancel-in-progress: false
+  # The newest run WINS, and that is deliberate.
+  #
+  # A sweep job now lives for hours (see the loop below), which makes a
+  # queued-behind policy actively harmful in two ways: a dispatched sweep
+  # cannot start until the running loop finishes - so pushing a fix and then
+  # asking for a sweep silently waits hours - and the running loop is pinned
+  # to whatever commit it checked out when it began, so it keeps writing
+  # results from stale code long after a fix has merged.
+  #
+  # Cancelling costs nothing: each iteration commits its own sweep row before
+  # sleeping, so an interrupted loop loses only an idle sleep.
+  cancel-in-progress: true
 
 jobs:
   sweep:
