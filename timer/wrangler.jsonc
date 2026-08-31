@@ -1,0 +1,30 @@
+{
+  // The timer's configuration, written down.
+  //
+  // The Worker is created in the Cloudflare dashboard (see README.md), which
+  // does not read this file - the dashboard holds the live values. This is the
+  // record of what those values should be, so the settings are reviewable in a
+  // PR instead of living only in someone's browser, and so the Worker can be
+  // recreated exactly if it is ever deleted.
+  "name": "gia-san-timer",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-31",
+
+  // Every 30 minutes. The sweep job paces itself hourly once running, and
+  // cancel-in-progress means a tick that lands while a loop is alive simply
+  // replaces it with a fresher one - so a missed tick costs 30 minutes,
+  // not a day.
+  "triggers": { "crons": ["*/30 * * * *"] },
+
+  // Public facts about this repo. Keeping them here rather than in code is
+  // what lets the timer be retargeted from the dashboard without a deploy.
+  "vars": {
+    "GITHUB_REPO": "nguyendinhngoc23052006/kwook-demo",
+    "WORKFLOW_FILE": "sweep.yml",
+    "GITHUB_REF": "main",
+    "SWEEP_ITERATIONS": "5"
+  }
+  // GITHUB_TOKEN is a SECRET and is deliberately absent from this file.
+  // Set it in the dashboard: Worker -> Settings -> Variables and Secrets,
+  // with type Secret, never Text.
+}
