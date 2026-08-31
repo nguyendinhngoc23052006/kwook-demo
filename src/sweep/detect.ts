@@ -3,6 +3,8 @@
  * no database. That is what makes them testable and what keeps a sweep cheap.
  */
 
+import { formatVnd } from "../lib/vnd.js";
+
 export type Observation = {
   listingUrlId: string;
   sellerId: string;
@@ -57,8 +59,8 @@ export function selfCannibalization(obs: Observation[], gapPct = 25): Finding[] 
           severity: "high",
           productSku: sku,
           listingUrlId: null,
-          oldValue: `${seller}: ${list.length} listings`,
-          newValue: `${min}-${max} (+${gap.toFixed(1)}%)`,
+          oldValue: `${seller}: ${list.length} listing`,
+          newValue: `${formatVnd(min)} – ${formatVnd(max)} đ (+${gap.toFixed(1)}%)`,
         });
       }
     }
@@ -97,8 +99,8 @@ export function deadListing(obs: Observation[], windowHours = 24): Finding[] {
           severity: "medium",
           productSku: sku,
           listingUrlId: id,
-          oldValue: `0 sold in ${windowHours}h`,
-          newValue: "sibling listing is selling",
+          oldValue: `0 lượt bán trong ${windowHours} giờ`,
+          newValue: "listing cùng sản phẩm vẫn đang bán",
         });
       }
     }
@@ -121,7 +123,7 @@ export function dispersion(obs: Observation[], thresholdPct = 30): Finding[] {
         severity: spread > 100 ? "high" : "medium",
         productSku: sku,
         listingUrlId: null,
-        oldValue: `${sellers.size} sellers`,
+        oldValue: `${sellers.size} người bán`,
         newValue: `+${spread.toFixed(1)}%`,
       });
     }
@@ -146,8 +148,8 @@ export function floorBreach(
         severity: "high" as const,
         productSku: o.productSku,
         listingUrlId: o.listingUrlId,
-        oldValue: `ref ${ref}`,
-        newValue: `${o.priceVnd} (${(((o.priceVnd - ref) / ref) * 100).toFixed(1)}%)`,
+        oldValue: `sàn ${formatVnd(ref)} đ`,
+        newValue: `${formatVnd(o.priceVnd)} đ (${(((o.priceVnd - ref) / ref) * 100).toFixed(1)}%)`,
       },
     ];
   });
@@ -164,8 +166,8 @@ export function fakeAnchor(obs: Observation[], multiple = 3): Finding[] {
         severity: "medium" as const,
         productSku: o.productSku,
         listingUrlId: o.listingUrlId,
-        oldValue: `anchor ${o.originalPriceVnd}`,
-        newValue: `${(o.originalPriceVnd / o.priceVnd).toFixed(1)}x the price`,
+        oldValue: `giá gạch ${formatVnd(o.originalPriceVnd)} đ`,
+        newValue: `gấp ${(o.originalPriceVnd / o.priceVnd).toFixed(1)} lần giá bán`,
       },
     ];
   });
@@ -183,8 +185,8 @@ export function attributionLoss(obs: Observation[], accepted: string[]): Finding
         severity: "high" as const,
         productSku: o.productSku,
         listingUrlId: o.listingUrlId,
-        oldValue: o.brandString ?? "(empty)",
-        newValue: "not an accepted brand spelling",
+        oldValue: o.brandString ?? "(trống)",
+        newValue: "không khớp cách viết thương hiệu nào",
       },
     ];
   });

@@ -38,7 +38,7 @@ describe("selfCannibalization", () => {
     const [f] = selfCannibalization(cluster);
     expect(f.type).toBe("self_cannibalization");
     expect(f.severity).toBe("high");
-    expect(f.newValue).toBe("120000-290000 (+141.7%)");
+    expect(f.newValue).toBe("120.000 – 290.000 đ (+141.7%)");
   });
 
   it("stays silent when one seller has a single listing per SKU", () => {
@@ -95,7 +95,7 @@ describe("dispersion", () => {
   it("fires across sellers and grades by magnitude", () => {
     const [f] = dispersion([cluster[0], { ...cluster[4], sellerId: "abby" }]);
     expect(f.severity).toBe("high");
-    expect(f.oldValue).toBe("2 sellers");
+    expect(f.oldValue).toBe("2 người bán");
   });
 });
 
@@ -105,7 +105,7 @@ describe("floorBreach", () => {
   it("fires below reference minus tolerance", () => {
     const [f] = floorBreach([cluster[0]], ref);
     expect(f.severity).toBe("high");
-    expect(f.newValue).toContain("120000");
+    expect(f.newValue).toContain("120.000");
   });
 
   it("is silent at reference and silent with no reference price", () => {
@@ -119,7 +119,7 @@ describe("fakeAnchor", () => {
     const [f] = fakeAnchor([
       obs({ listingUrlId: "f", priceVnd: 159_000, originalPriceVnd: 1_250_000 }),
     ]);
-    expect(f.newValue).toBe("7.9x the price");
+    expect(f.newValue).toBe("gấp 7.9 lần giá bán");
   });
 
   it("ignores an ordinary discount and a missing anchor", () => {
