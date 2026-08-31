@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
 import type { ListingRow } from "./group.js";
+import type { Snapshot } from "./history.js";
 
 export type Sweep = {
   id: string;
@@ -35,11 +36,26 @@ export type Source = {
 
 export type Dashboard = {
   sweep: Sweep | null;
+  /** Newest first. Bounded so the page stays one small fetch, not a full archive. */
+  sweepHistory: Sweep[];
+  history: Snapshot[];
   listings: ListingRow[];
   products: Product[];
   events: EventRow[];
   sources: Source[];
 };
+
+/**
+ * How far back the history screen reads — a day at the hourly cadence.
+ *
+ * The bound is not cosmetic. PostgREST caps a response at 1000 rows by
+ * default, and a truncated history does not merely show less: the missing
+ * rows read as gaps, so changesBetween would compare across them and invent
+ * moves that never happened. 24 sweeps x 29 listings leaves headroom under
+ * that cap. If the catalogue grows past ~40 listings, lower this or page the
+ * query — do not just raise it.
+ */
+const HISTORY_SWEEPS = 24;
 
 type State =
   | { status: "loading" }
@@ -68,11 +84,11 @@ export function useDashboard(): State {
         .from("sweeps")
         .select("id,started_at,finished_at,sources_ok,sources_attempted,listings_observed,errors")
         .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(HISTORY_SWEEPS);
       if (sweepRes.error) throw new Error(sweepRes.error.message);
 
-      const sweep = sweepRes.data as Sweep | null;
+      const sweepHistory = sweepRes.data as Sweep[];
+      const sweep = sweepHistory[0] ?? null;
 
       // Products and sources describe the setup, so they load even with no sweep
       // yet — that empty state should still show what is being watched.
@@ -88,9 +104,10 @@ export function useDashboard(): State {
 
       let listings: ListingRow[] = [];
       let events: EventRow[] = [];
+      let history: Snapshot[] = [];
 
       if (sweep) {
-        const [obsRes, eventsRes] = await Promise.all([
+        const [obsRes, eventsRes, historyRes] = await Promise.all([
           supabase
             .from("observations")
             .select(
@@ -101,9 +118,18 @@ export function useDashboard(): State {
             .from("events")
             .select("id,type,severity,product_sku,listing_url_id,old_value,new_value")
             .eq("sweep_id", sweep.id),
+          supabase
+            .from("observations")
+            .select("listing_url_id,sweep_id,observed_at,title_seen,price_vnd,units_sold")
+            .in(
+              "sweep_id",
+              sweepHistory.map((s) => s.id),
+            ),
         ]);
         if (obsRes.error) throw new Error(obsRes.error.message);
         if (eventsRes.error) throw new Error(eventsRes.error.message);
+        if (historyRes.error) throw new Error(historyRes.error.message);
+        history = historyRes.data as Snapshot[];
 
         listings = (obsRes.data as unknown as ObservationJoin[]).map((o) => ({
           listing_url_id: o.listing_url_id,
@@ -124,6 +150,8 @@ export function useDashboard(): State {
           status: "ready",
           data: {
             sweep,
+            sweepHistory,
+            history,
             listings,
             products: productsRes.data as Product[],
             events,

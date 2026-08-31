@@ -241,3 +241,14 @@ footer {
   color: var(--muted);
   font-size: 0.82rem;
 }
+
+h2.section {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 1.5rem 0 0.5rem;
+}
+h2.section:first-child {
+  margin-top: 0;
+}
