@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 import { clean } from "./clean.js";
+import { type QueueCandidate, stillListed } from "./current.js";
 import type { Observation } from "./detect.js";
 import { runDetectors } from "./events.js";
 import { fetchPage } from "./fetchSource.js";
@@ -56,6 +57,9 @@ const referenceBySku = new Map(
 
 let sourcesOk = 0;
 let sourcesAttempted = 0;
+// Which sources actually answered this sweep. A listing missing from a source
+// we READ is gone; a listing missing from a source we could not read is not.
+const sourcesRead = new Set<string>();
 let observed = 0;
 
 for (const src of (sources ?? []) as Src[]) {
@@ -182,6 +186,7 @@ for (const src of (sources ?? []) as Src[]) {
 
   if (ok) {
     sourcesOk++;
+    sourcesRead.add(src.id);
     await db
       .from("sources")
       .update({ consecutive_failures: 0, last_success_at: new Date().toISOString() })
@@ -202,14 +207,23 @@ for (const src of (sources ?? []) as Src[]) {
 {
   const { data: pending } = await db
     .from("listing_urls")
-    .select("id, url")
+    .select("id, url, source_id, last_seen_at")
     .is("product_sku", null)
     .eq("out_of_scope", false);
 
   const { data: alreadyProposed } = await db.from("resolution_proposals").select("listing_url_id");
   const seen = new Set((alreadyProposed ?? []).map((r) => r.listing_url_id as string));
 
-  const needed = (pending ?? []).filter((l) => !seen.has(l.id as string));
+  // Ghosts are dropped before the model is asked, not after. A listing that
+  // no longer appears on a source we read successfully is not a resolution
+  // problem - it is gone - and asking about it every hour costs a request and
+  // writes a proposal nothing will ever render.
+  const live = stillListed(
+    (pending ?? []) as (QueueCandidate & { id: string; url: string })[],
+    sourcesRead,
+    sweep.started_at as string,
+  );
+  const needed = live.filter((l) => !seen.has(l.id));
 
   if (needed.length > 0) {
     // The title as last observed - the model reads what the seller wrote.
