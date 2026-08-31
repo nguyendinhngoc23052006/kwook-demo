@@ -1,28 +1,26 @@
 import { createClient } from "@supabase/supabase-js";
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+/**
+ * The URL and the PUBLISHABLE key are public values. Vite inlines them into
+ * the bundle, so every visitor already downloads them — committing them here
+ * gives away nothing that shipping the app doesn't. What they grant is exactly
+ * what RLS allows: anon SELECT on the seven tables, no write policy anywhere.
+ * The SECRET key is a different thing entirely and never appears in this
+ * directory; it lives only in the sweep workflow's repository secrets.
+ *
+ * They are defaults, not hardcoding: an environment variable still wins when
+ * one is set, so pointing a build at another project stays a dashboard edit.
+ * The point is that a missing or misnamed variable degrades to a working demo
+ * instead of a blank page.
+ */
+const PUBLIC_URL = "https://mqzmsvmqhaloqzaimzqe.supabase.co";
+const PUBLIC_KEY = "sb_publishable_JkeTd95euemWhroIuAXl2g_dmbe-iH3";
 
-const missing = [
-  url ? null : "VITE_SUPABASE_URL",
-  key ? null : "VITE_SUPABASE_PUBLISHABLE_KEY",
-].filter(Boolean);
+const url = import.meta.env.VITE_SUPABASE_URL || PUBLIC_URL;
+const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || PUBLIC_KEY;
 
-if (missing.length > 0) {
-  // Report what the build ACTUALLY received, not just what it wanted. Vite
-  // inlines import.meta.env as a literal object, so these are exactly the
-  // VITE_ keys that existed at build time. A name typo or a variable set on
-  // the wrong environment shows up here immediately instead of looking
-  // identical to a variable that was never set at all.
-  const injected = Object.keys(import.meta.env)
-    .filter((k) => k.startsWith("VITE_"))
-    .sort();
-
-  throw new Error(
-    `Thiếu biến môi trường lúc build: ${missing.join(", ")}. ` +
-      `Bản build này nhận được: ${injected.length > 0 ? injected.join(", ") : "(không có biến VITE_ nào)"}. ` +
-      "Đặt trong Cloudflare Pages → Settings → Variables and secrets (cả Production và Preview), rồi build lại.",
-  );
-}
+/** True when this build fell back — surfaced in the UI footer, not thrown. */
+export const usingBuiltInConfig =
+  !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 export const supabase = createClient(url, key, { auth: { persistSession: false } });
