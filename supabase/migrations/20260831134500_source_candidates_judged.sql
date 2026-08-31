@@ -19,5 +19,12 @@
 -- It goes rather than staying as a permanently priceless row. A source table
 -- that lists things which never worked teaches the reader to distrust the
 -- ones that do.
+-- observations first: they hold a foreign key to the listing. The rows being
+-- removed carry a null price and a blog headline, so nothing observed about
+-- any actual price is lost - only the record of having fetched an article.
+delete from observations
+ where listing_url_id in (select id from listing_urls where source_id = 'newfresh');
+delete from resolution_proposals
+ where listing_url_id in (select id from listing_urls where source_id = 'newfresh');
 delete from listing_urls where source_id = 'newfresh';
 delete from sources      where id        = 'newfresh';
