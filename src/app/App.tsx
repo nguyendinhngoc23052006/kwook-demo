@@ -35,14 +35,20 @@ export function App() {
     );
   }
 
-  const { sweep, sweepHistory, history, listings, products, events, sources } = state.data;
+  const { sweep, sweepHistory, history, listings, products, events, sources, urlsBySource } =
+    state.data;
+  const unconfiguredSources = sources.filter((s) => (urlsBySource[s.id] ?? 0) === 0).length;
   const unresolved = listings.filter((l) => l.product_sku === null).length;
 
   const tabs: { id: Tab; label: string; pip?: number }[] = [
     { id: "gia", label: "Bảng giá" },
     { id: "canh-bao", label: "Cảnh báo", pip: events.length },
     { id: "dien-bien", label: "Diễn biến" },
-    { id: "nguon", label: "Nguồn", pip: sources.filter((s) => !s.active).length },
+    {
+      id: "nguon",
+      label: "Nguồn",
+      pip: sources.filter((s) => !s.active).length + unconfiguredSources,
+    },
     { id: "chua-khop", label: "Chưa khớp", pip: unresolved },
   ];
 
@@ -63,6 +69,9 @@ export function App() {
                 {sweep.sources_ok}/{sweep.sources_attempted}
               </strong>{" "}
               nguồn OK
+              {unconfiguredSources > 0 && (
+                <span className="muted"> · {unconfiguredSources} chưa cấu hình</span>
+              )}
             </span>
             <span>
               <strong>{count(sweep.listings_observed)}</strong> listing
@@ -84,7 +93,7 @@ export function App() {
       {tab === "gia" && <BangGia listings={listings} products={products} />}
       {tab === "canh-bao" && <CanhBao events={events} listings={listings} />}
       {tab === "dien-bien" && <DienBien sweepHistory={sweepHistory} history={history} />}
-      {tab === "nguon" && <Nguon sources={sources} />}
+      {tab === "nguon" && <Nguon sources={sources} urlsBySource={urlsBySource} />}
       {tab === "chua-khop" && <ChuaKhop listings={listings} />}
 
       <footer>
