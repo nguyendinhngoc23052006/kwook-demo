@@ -3,12 +3,13 @@ import { usingBuiltInConfig } from "../lib/supabaseClient.js";
 import { BangGia } from "./BangGia.js";
 import { CanhBao } from "./CanhBao.js";
 import { ChuaKhop } from "./ChuaKhop.js";
+import { DienBien } from "./DienBien.js";
 import { count, when } from "./format.js";
 import { Nguon } from "./Nguon.js";
 import "./styles.css";
 import { useDashboard } from "./useDashboard.js";
 
-type Tab = "gia" | "canh-bao" | "nguon" | "chua-khop";
+type Tab = "gia" | "canh-bao" | "dien-bien" | "nguon" | "chua-khop";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("gia");
@@ -34,12 +35,13 @@ export function App() {
     );
   }
 
-  const { sweep, listings, products, events, sources } = state.data;
+  const { sweep, sweepHistory, history, listings, products, events, sources } = state.data;
   const unresolved = listings.filter((l) => l.product_sku === null).length;
 
   const tabs: { id: Tab; label: string; pip?: number }[] = [
     { id: "gia", label: "Bảng giá" },
     { id: "canh-bao", label: "Cảnh báo", pip: events.length },
+    { id: "dien-bien", label: "Diễn biến" },
     { id: "nguon", label: "Nguồn", pip: sources.filter((s) => !s.active).length },
     { id: "chua-khop", label: "Chưa khớp", pip: unresolved },
   ];
@@ -81,6 +83,7 @@ export function App() {
 
       {tab === "gia" && <BangGia listings={listings} products={products} />}
       {tab === "canh-bao" && <CanhBao events={events} listings={listings} />}
+      {tab === "dien-bien" && <DienBien sweepHistory={sweepHistory} history={history} />}
       {tab === "nguon" && <Nguon sources={sources} />}
       {tab === "chua-khop" && <ChuaKhop listings={listings} />}
 
