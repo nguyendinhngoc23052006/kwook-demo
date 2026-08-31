@@ -1,0 +1,15 @@
+-- Vietmart has no reachable domain, so it has no entry point.
+--
+-- Both spellings fail DNS resolution outright, not an HTTP status:
+--   vietmart.co          -> getaddrinfo ENOTFOUND
+--   xn--vitmart-fya.vn   -> getaddrinfo ENOTFOUND   (việtmart.vn, the original seed)
+--
+-- The URL was added from a search result that pointed at vietmart.co; the
+-- host does not exist. Leaving it in place would accumulate failures against
+-- a source that can never succeed, and would eventually trip the
+-- three-strikes deactivation with a misleading reason ("3 consecutive
+-- failures" rather than "there is no such site").
+--
+-- The source row stays. It records a channel the business named, and Nguồn
+-- will show it honestly as having no URL to sweep until a live one is found.
+delete from listing_urls where source_id = 'vietmart';
