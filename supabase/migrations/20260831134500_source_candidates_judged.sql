@@ -1,0 +1,23 @@
+-- Two candidate sellers were added to widen coverage beyond a single Shopee
+-- shop, then judged by an actual sweep rather than by guessing. Keep the one
+-- that returned prices; delete the one that cannot.
+--
+-- TIKI — KEPT. Both product URLs returned prices through JSON-LD:
+--   400G KIM VỤN 400g            135.000 đ
+--   thùng 10 gói vụn 400gr     1.320.000 đ
+-- This is the point of the exercise: KW-VUN-400 now has a second seller
+-- (kitbuy 159.000-169.000 vs tiki 135.000), so dispersion has something real
+-- to compare. The 25,2% gap sits under the 30% threshold and correctly does
+-- not raise an alert.
+--
+-- NEW FRESH MART — DELETED. The page fetched fine, 332 KB, four JSON-LD
+-- blocks - and not one of them is a Product. The types are Organization,
+-- WebSite, BreadcrumbList and NewsArticle: the URL is a blog ARTICLE about
+-- K-Wook seaweed, not a listing. There is no price because nothing is on
+-- sale there, so no parser change would help.
+--
+-- It goes rather than staying as a permanently priceless row. A source table
+-- that lists things which never worked teaches the reader to distrust the
+-- ones that do.
+delete from listing_urls where source_id = 'newfresh';
+delete from sources      where id        = 'newfresh';
