@@ -31,14 +31,19 @@ const referenceBySku = new Map(
 );
 
 let sourcesOk = 0;
+let sourcesAttempted = 0;
 let observed = 0;
 
 for (const src of (sources ?? []) as Src[]) {
   const entryPoints = ((seeds ?? []) as Listing[]).filter((l) => l.source_id === src.id);
   if (entryPoints.length === 0) {
+    // Not a failure and not an attempt: there is nothing to fetch until this
+    // source has an entry point. Counting it as attempted would report it as
+    // a broken source forever, which is the opposite of what happened.
     console.log(`${src.id}: no listing urls seeded, skipping`);
     continue;
   }
+  sourcesAttempted++;
 
   let ok = false;
 
@@ -203,7 +208,7 @@ await db
   .from("sweeps")
   .update({
     finished_at: new Date().toISOString(),
-    sources_attempted: (sources ?? []).length,
+    sources_attempted: sourcesAttempted,
     sources_ok: sourcesOk,
     listings_observed: observed,
     errors,
@@ -211,7 +216,8 @@ await db
   .eq("id", sweep.id);
 
 console.log(
-  `sweep ${sweep.id} done: ${sourcesOk}/${(sources ?? []).length} sources ok, ${observed} listings`,
+  `sweep ${sweep.id} done: ${sourcesOk}/${sourcesAttempted} sources ok ` +
+    `(${(sources ?? []).length - sourcesAttempted} not configured), ${observed} listings`,
 );
 if (errors.length) {
   console.log(`${errors.length} error(s):`, JSON.stringify(errors, null, 2));
