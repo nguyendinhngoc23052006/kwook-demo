@@ -1,0 +1,103 @@
+# Restarts the sweep chain, and only when the chain is dead.
+#
+# sweep.yml keeps its own cadence: each run sweeps a few times an hour apart,
+# then dispatches its successor. That chain survives everything except a
+# cancelled run, a failed run, a job timeout, or a dispatch that GitHub
+# refused - and after any of those, nothing is left to start the next one.
+#
+# This is the only cron in the repo, and it is deliberately NOT in sweep.yml.
+# A cron there would fire whether or not a sweep was already running, and
+# sweep.yml's `cancel-in-progress` would then kill the healthy run twice an
+# hour: no run would ever reach its next target, every handoff would be
+# skipped as cancelled, and the chain would never do anything. The recovery
+# trigger must not be able to cancel the thing it is recovering. So it lives
+# here, in its own concurrency group, and looks before it starts anything.
+name: sweep-watchdog
+
+on:
+  schedule:
+    # NOT on the hour. GitHub documents the schedule event as delayed under
+    # load and droppable, with load concentrated at the start of each hour, so
+    # it recommends a different minute.
+    # Verified: 2026-08-31, docs/actions "Events that trigger workflows".
+    #
+    # Twice an hour means a dead chain is restarted within 30 minutes. When the
+    # chain is alive - the normal case - both firings cost one API call and
+    # exit.
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+# Its own group. Sharing `sweep` would make the watchdog cancel the very run
+# it exists to protect.
+concurrency:
+  group: sweep-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    name: watchdog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # Read to see whether a sweep is running, write to start one.
+      actions: write
+    steps:
+      - name: Start a sweep only if none is running
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -eu
+
+          # Alive is defined as NOT completed, rather than by listing the
+          # statuses that mean alive.
+          #
+          # That list is longer than it looks and it grows: besides queued and
+          # in_progress there are requested, waiting, pending and
+          # action_required, several of which only GitHub sets. Enumerating
+          # them means every status GitHub adds later is silently read as
+          # "dead", and the watchdog starts a second sweep on top of a live
+          # one. `completed` is the only status that promises a run will never
+          # do anything again, so it is the only one worth naming.
+          # Verified: 2026-09-01, docs.github.com REST "List workflow runs for
+          # a repository" (status values).
+          #
+          # `--jq` rather than a pipe into jq on purpose: a pipeline would hide
+          # a failing `gh` behind jq's exit code, since `set -e` without
+          # pipefail only sees the last command in a pipe.
+          alive=$(gh run list \
+            --repo "$REPO" \
+            --workflow sweep.yml \
+            --limit 100 \
+            --json status \
+            --jq '[.[] | select(.status != "completed")] | length')
+
+          if [ "$alive" -gt 0 ]; then
+            echo "sweep chain alive ($alive run(s) in flight) - nothing to do"
+            exit 0
+          fi
+
+          # The handoff window.
+          #
+          # A finishing sweep dispatches its successor as its last step, and
+          # that successor is not listable the instant the call returns. A
+          # watchdog firing inside that window sees zero alive runs and starts
+          # a duplicate - self-healing, because cancel-in-progress keeps only
+          # one, but it costs a redundant sweep row in a log whose whole point
+          # is a clean hourly rhythm. So a sweep that ended moments ago is
+          # treated as still handing off.
+          last_end=$(gh run list \
+            --repo "$REPO" --workflow sweep.yml --limit 1 \
+            --json updatedAt --jq '.[0].updatedAt // empty')
+
+          if [ -n "$last_end" ]; then
+            age=$(( $(date -u +%s) - $(date -u -d "$last_end" +%s) ))
+            if [ "$age" -lt 180 ]; then
+              echo "last sweep ended ${age}s ago - its handoff is probably in flight"
+              exit 0
+            fi
+          fi
+
+          echo "no sweep in flight - restarting the chain on $REF"
+          gh workflow run sweep.yml --repo "$REPO" --ref "$REF"
