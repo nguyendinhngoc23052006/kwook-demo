@@ -66,15 +66,22 @@ describe("deadListing", () => {
     obs({ listingUrlId: "e", unitsSold: 12, observedAt: at(20) }),
   ];
 
+  // The clock these observations were taken against, pinned an hour after the
+  // last of them. Without this the suite quietly depends on the real date:
+  // the fixture sits on 2026-08-30 and the window is 48 hours, so every one
+  // of these assertions started failing at 2026-09-01T01:00Z regardless of
+  // what the branch had changed.
+  const NOW = Date.UTC(2026, 7, 30, 21);
+
   it("flags the flat listing while a sibling sells", () => {
-    const f = deadListing(series, 48);
+    const f = deadListing(series, 48, NOW);
     expect(f).toHaveLength(1);
     expect(f[0].listingUrlId).toBe("e");
   });
 
   it("stays silent when nothing is selling - a quiet SKU is not a dead listing", () => {
     const quiet = series.map((o) => ({ ...o, unitsSold: 5 }));
-    expect(deadListing(quiet, 48)).toEqual([]);
+    expect(deadListing(quiet, 48, NOW)).toEqual([]);
   });
 
   it("needs two points inside the window, so a single sweep flags nothing", () => {
@@ -82,8 +89,18 @@ describe("deadListing", () => {
       deadListing(
         series.filter((o) => o.observedAt === at(1)),
         48,
+        NOW,
       ),
     ).toEqual([]);
+  });
+
+  it("ignores observations older than the window, however many there are", () => {
+    // The behaviour the rotted test was accidentally exercising: once the
+    // fixture falls out of the window there are fewer than two points per
+    // listing, so nothing is flagged. Asserted deliberately now, with an
+    // explicit clock, instead of arriving two days late by surprise.
+    const later = Date.UTC(2026, 7, 30, 21) + 72 * 3_600_000;
+    expect(deadListing(series, 48, later)).toEqual([]);
   });
 });
 
