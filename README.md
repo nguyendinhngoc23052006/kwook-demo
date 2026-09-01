@@ -40,7 +40,8 @@ price.
 ## How it works
 
 ```
-GitHub Actions (one job, five sweeps an hour apart)
+GitHub Actions (one run: four sweeps at :05 past the hour, then it
+      │          starts the next run)
       │  fetch → parse → scope → resolve → detect → propose → explain
       ▼
   Supabase Postgres  ──────────►  Cloudflare Pages
@@ -52,8 +53,11 @@ Four moving parts, all on free tiers:
 - **GitHub Actions** runs the sweep and gates every merge. Minutes are free and
   unmetered on a public repo, so the scraping, parsing and detecting all live
   here. The `schedule` event is best-effort — GitHub documents it as delayed
-  under load and droppable — so the job paces itself once started rather than
-  relying on the scheduler for each hour.
+  under load and droppable, and it left this repo 126- and 193-minute holes —
+  so each sweep run books its own successor instead. The only cron lives in
+  `sweep-watchdog.yml`, which restarts the chain **only when no sweep is
+  running**; a cron on the sweep itself would cancel the healthy run twice an
+  hour.
 - **Supabase Postgres** stores everything. Schema changes are migration files
   in `supabase/migrations/`; the database is never edited by hand.
 - **Cloudflare Pages** serves the dashboard, deployed by its GitHub

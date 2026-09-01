@@ -1,22 +1,21 @@
 name: sweep
 
+# Started ONLY by dispatch - by the previous run's handoff step, by the
+# watchdog in sweep-watchdog.yml, or by a human pressing the button.
+#
+# There is deliberately no `schedule:` here any more, and removing it was not
+# a simplification - it was a bug fix. A cron on THIS workflow fires whether
+# or not a sweep is already running, and `cancel-in-progress` below would then
+# kill the healthy run twice an hour, every hour. No run would ever reach its
+# next target, every handoff would be skipped as cancelled, and the chain
+# would be decorative. The recovery trigger must not be able to cancel the
+# thing it is recovering, so it lives in its own workflow and checks first.
 on:
-  schedule:
-    # NOT on the hour. GitHub documents that the schedule event is delayed
-    # under load and that queued jobs may be DROPPED, with load concentrated
-    # at the start of each hour - so it recommends a different minute.
-    # Verified: 2026-08-31, docs/actions "Events that trigger workflows".
-    #
-    # Running at :17 and :47 is the hedge: two chances an hour, neither in the
-    # contended slot, so a dropped run costs half an hour instead of the whole
-    # day. Minutes are free and unmetered on a public repo, so the only cost
-    # of the second run is a row in the sweep log.
-    - cron: "17,47 * * * *"
   workflow_dispatch:
     inputs:
       iterations:
         description: "How many hourly sweeps this job should run before exiting"
-        default: "5"
+        default: "4"
 
 concurrency:
   group: sweep
@@ -38,12 +37,21 @@ jobs:
     name: sweep
     runs-on: ubuntu-latest
     # Long by design: this job sweeps hourly from the inside (see the loop
-    # below), so it lives for hours rather than minutes. The ceiling on a
-    # GitHub-hosted job is 6 hours; this stays under it.
+    # below), so it lives for hours rather than minutes. A GitHub-hosted job
+    # is terminated at 360 minutes and the cap cannot be raised, so this stays
+    # under it - and 4 iterations use ~250 of those minutes.
+    # Verified: 2026-09-01, docs.github.com "Limits in GitHub Actions".
     timeout-minutes: 340
     permissions:
       contents: read
       issues: write
+      # Only for the handoff below: this job asks GitHub to start its own
+      # successor. workflow_dispatch is one of the two events GITHUB_TOKEN is
+      # explicitly allowed to raise - the recursion block that silences
+      # push-triggered workflows does not apply to it.
+      # Verified: 2026-09-01, GitHub Changelog 2022-09-08 "Use the GITHUB_TOKEN
+      # with workflow_dispatch and repository_dispatch".
+      actions: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -54,16 +62,17 @@ jobs:
       # One job, several sweeps, an hour apart.
       #
       # GitHub's scheduler is best-effort: it documents that `schedule` is
-      # delayed under load and that queued runs may be DROPPED. Measured on
-      # this repo, it is not merely late - across 31 Aug it fired twice all
-      # day, and missed six consecutive :17/:47 slots. No cron expression
-      # fixes that, because the problem is not which minute we ask for.
+      # delayed under load and that queued runs may be DROPPED.
+      # Verified: 2026-08-31, docs/actions "Events that trigger workflows".
+      # Measured on
+      # this repo it is not merely late - it fired 3 times in 2 days and left
+      # holes of 126 and 193 minutes. No cron expression fixes that, because
+      # the problem is not which minute we ask for.
       #
-      # So the schedule is demoted to a STARTER, and the cadence is kept
-      # inside the job: each firing runs several sweeps an hour apart. One
-      # lucky trigger now buys ~5 hours of hourly data instead of a single
-      # sample. Actions minutes are free and unmetered on a public repo, so
-      # the runner time costs nothing.
+      # So the cadence lives inside the job: each start runs several sweeps an
+      # hour apart, and the last thing the job does is book its successor.
+      # Actions minutes are free and unmetered on a public repo, so holding a
+      # runner through the sleeps costs nothing.
       #
       # A failed sweep does not abandon the remaining hours - it is recorded
       # and the loop continues, then the step fails at the end so the issue
@@ -76,24 +85,86 @@ jobs:
           # before and simply produces no resolution proposals.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          # Every sweep after the first lands on this minute past the hour.
+          # Not :00 - GitHub documents load as concentrated at the start of
+          # each hour and recommends a different minute.
+          # Verified: 2026-08-31, docs/actions "Events that trigger workflows".
+          TARGET_MINUTE: "05"
+          ITERATIONS: ${{ inputs.iterations || '4' }}
         run: |
           set -u
-          total="${{ inputs.iterations || '5' }}"
+
+          # Sweeps land on a CLOCK, not on a stopwatch.
+          #
+          # `sleep 3300` after each sweep added every sweep's own duration to
+          # the gap, so the log drifted - 58, 59, 61 minutes - and no two days
+          # lined up. Targets are absolute instead: the next :05, then +1h,
+          # +1h. A sweep that runs long eats into its own sleep rather than
+          # pushing the next one later.
+          now() { date -u +%s; }
+          target=$(date -u -d "$(date -u +%Y-%m-%dT%H):${TARGET_MINUTE}:00" +%s)
+
           failures=0
-          for i in $(seq 1 "$total"); do
-            echo "::group::sweep $i of $total"
+          for i in $(seq 1 "$ITERATIONS"); do
+            echo "::group::sweep $i of $ITERATIONS"
             if ! npm run sweep; then
               failures=$((failures + 1))
               echo "sweep $i failed; continuing so the remaining hours still run"
             fi
             echo "::endgroup::"
-            if [ "$i" -lt "$total" ]; then
-              echo "sleeping 55 minutes before sweep $((i + 1))"
-              sleep 3300
-            fi
+
+            # Sleep even after the LAST sweep. The successor starts as soon as
+            # this job exits and sweeps immediately, so handing off straight
+            # after a sweep would put two sweeps two minutes apart. Waiting out
+            # the final hour is what makes the handoff invisible in the log.
+            #
+            # Stepping the target forward in a loop covers both the first
+            # iteration (whose target may already be in the past) and a sweep
+            # that overran its slot: a missed target is skipped, never slept
+            # through backwards.
+            while [ "$target" -le "$(now)" ]; do target=$((target + 3600)); done
+            echo "sleeping until $(date -u -d "@$target" +%H:%M) UTC"
+            # Read the clock ONCE. Calling now() again inside the sleep
+            # argument reopens the gap the while-loop just closed: if the
+            # target is a second away, time can cross it between the check and
+            # the subtraction, and `sleep -1` is an error that would kill the
+            # step and with it the chain.
+            wait=$((target - $(now)))
+            if [ "$wait" -gt 0 ]; then sleep "$wait"; fi
           done
-          echo "$failures of $total sweeps failed"
+
+          echo "$failures of $ITERATIONS sweeps failed"
           [ "$failures" -eq 0 ]
+
+      # The chain: this run starts the next one.
+      #
+      # Steady state is each run booking its successor, so nothing outside the
+      # repo has to keep time. sweep-watchdog.yml is the recovery path and only
+      # acts when this chain is already dead.
+      #
+      # `if: success()` is load-bearing, not tidiness. A cancelled run must
+      # dispatch NOTHING: the run that cancelled it is already running, and a
+      # dying run that booked a successor would have that successor cancel its
+      # own canceller - forever, with no sweep ever completing. A failed run is
+      # silent for the same reason it is safe: the cron picks the chain back up
+      # within 30 minutes.
+      - name: Hand off to the next run
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -eu
+          # --repo explicitly, like the watchdog: inferring it from .git works
+          # until a step changes directory or the checkout is shallow in some
+          # future way, and a handoff that silently targets nothing breaks the
+          # chain until the watchdog notices.
+          gh workflow run sweep.yml \
+            --repo "$REPO" \
+            --ref "$REF" \
+            -f iterations="${{ inputs.iterations || '4' }}"
+          echo "next run requested on $REF"
 
       # Ground truth for the parser. The cleaned text loses the sale price when
       # a strikethrough anchor is present, so the parser is written against raw
