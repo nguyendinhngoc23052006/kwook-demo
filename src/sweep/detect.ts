@@ -73,9 +73,15 @@ export function selfCannibalization(obs: Observation[], gapPct = 25): Finding[] 
  * of the same SKU is selling. Window is TIME, not sweep count - at hourly
  * cadence "no growth in 3 sweeps" means three hours and marks everything dead.
  */
-export function deadListing(obs: Observation[], windowHours = 24): Finding[] {
+export function deadListing(obs: Observation[], windowHours = 24, now = Date.now()): Finding[] {
   const out: Finding[] = [];
-  const cutoff = Date.now() - windowHours * 3_600_000;
+  // `now` is injectable because this is the only detector that reads the
+  // clock, and a function that reads the clock cannot be pinned by a test.
+  // It was not, and the test rotted exactly the way that guarantees: its
+  // fixture is dated 2026-08-30 and the window is 48 hours, so the suite
+  // passed for two days and then went red on every branch at once from
+  // 2026-09-01T01:00Z - on a change that touched nothing near it.
+  const cutoff = now - windowHours * 3_600_000;
   for (const [sku, group] of bySku(obs)) {
     const byListing = new Map<string, Observation[]>();
     for (const o of group)
