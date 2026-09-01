@@ -64,10 +64,10 @@ jobs:
       # GitHub's scheduler is best-effort: it documents that `schedule` is
       # delayed under load and that queued runs may be DROPPED.
       # Verified: 2026-08-31, docs/actions "Events that trigger workflows".
-      # Measured on
-      # this repo it is not merely late - it fired 3 times in 2 days and left
-      # holes of 126 and 193 minutes. No cron expression fixes that, because
-      # the problem is not which minute we ask for.
+      #
+      # Measured on this repo it is not merely late: it fired 3 times in 2 days
+      # and left holes of 126 and 193 minutes. No cron expression fixes that,
+      # because the problem is not which minute we ask for.
       #
       # So the cadence lives inside the job: each start runs several sweeps an
       # hour apart, and the last thing the job does is book its successor.
@@ -146,8 +146,8 @@ jobs:
       # dispatch NOTHING: the run that cancelled it is already running, and a
       # dying run that booked a successor would have that successor cancel its
       # own canceller - forever, with no sweep ever completing. A failed run is
-      # silent for the same reason it is safe: the cron picks the chain back up
-      # within 30 minutes.
+      # silent for the same reason it is safe: the watchdog's cron picks the
+      # chain back up within 30 minutes.
       - name: Hand off to the next run
         if: success()
         env:
