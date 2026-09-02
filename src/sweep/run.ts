@@ -21,7 +21,7 @@ if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY are requ
 const db = createClient(url, key, { auth: { persistSession: false } });
 
 type Src = { id: string; fetch_strategy: string; consecutive_failures: number };
-type Listing = { id: string; url: string; source_id: string };
+type Listing = { id: string; url: string; source_id: string; is_entry_point: boolean };
 
 const errors: SweepError[] = [];
 
@@ -49,7 +49,7 @@ if (sweepErr || !sweep) throw new Error(`could not open a sweep: ${sweepErr?.mes
 console.log(`sweep ${sweep.id} started`);
 
 const { data: sources } = await db.from("sources").select("*").eq("active", true);
-const { data: seeds } = await db.from("listing_urls").select("id,url,source_id");
+const { data: seeds } = await db.from("listing_urls").select("id,url,source_id,is_entry_point");
 const { data: productRows } = await db
   .from("products")
   .select("sku,aliases,reference_price_vnd,name_canonical,net_weight_g,pack_format");
@@ -66,7 +66,12 @@ const sourcesRead = new Set<string>();
 let observed = 0;
 
 for (const src of (sources ?? []) as Src[]) {
-  const entryPoints = ((seeds ?? []) as Listing[]).filter((l) => l.source_id === src.id);
+  // Only entry points. The other rows for a source are products a parse
+  // DISCOVERED - fetching those re-reads pages whose contents this sweep
+  // already has, and hands a product page to a parser expecting an index.
+  const entryPoints = ((seeds ?? []) as Listing[]).filter(
+    (l) => l.source_id === src.id && l.is_entry_point,
+  );
   if (entryPoints.length === 0) {
     // Not a failure and not an attempt: there is nothing to fetch until this
     // source has an entry point. Counting it as attempted would report it as
@@ -155,6 +160,10 @@ for (const src of (sources ?? []) as Src[]) {
               resolved_by: hit?.method ?? null,
               out_of_scope: scope.outOfScope,
               out_of_scope_brand: scope.outOfScope ? scope.brand : null,
+              // is_entry_point is deliberately absent. On a new row the column
+              // default (false) applies; on an existing one PostgREST leaves
+              // the stored value alone, so a discovered product never demotes
+              // a URL that is genuinely an entry point.
             },
             { onConflict: "url" },
           )
