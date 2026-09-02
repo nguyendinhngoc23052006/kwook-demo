@@ -6,6 +6,7 @@ import type { Observation } from "./detect.js";
 import { runDetectors } from "./events.js";
 import { explainFindings, type FindingContext } from "./explain.js";
 import { fetchPage } from "./fetchSource.js";
+import { type SweepError, sweepFailed } from "./outcome.js";
 import { parseStoreIndex } from "./parse.js";
 import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
 import { proposeResolutions } from "./propose.js";
@@ -21,7 +22,7 @@ const db = createClient(url, key, { auth: { persistSession: false } });
 type Src = { id: string; fetch_strategy: string; consecutive_failures: number };
 type Listing = { id: string; url: string; source_id: string };
 
-const errors: unknown[] = [];
+const errors: SweepError[] = [];
 
 // Close out any sweep left open by an interrupted run.
 //
@@ -429,6 +430,15 @@ console.log(
     `(${(sources ?? []).length - sourcesAttempted} not configured), ${observed} listings`,
 );
 if (errors.length) {
-  console.log(`${errors.length} error(s):`, JSON.stringify(errors, null, 2));
+  console.log(`${errors.length} issue(s) recorded:`, JSON.stringify(errors, null, 2));
+}
+
+// Exit on what the sweep failed to DO, not on everything it noticed. The
+// hourly chain is handed off by this process's own run, so a non-zero exit
+// here is what stops the clock - see outcome.ts for why that distinction had
+// to be drawn.
+const fatal = sweepFailed(errors, { sourcesAttempted, sourcesOk });
+if (fatal) {
+  console.error(`sweep failed: ${fatal}`);
   process.exit(1);
 }
