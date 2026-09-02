@@ -75,13 +75,21 @@ function firstOffer(node: Record<string, unknown>): Record<string, unknown> | nu
 
 function metaContent(html: string, key: string): string | null {
   // property= and name= both occur; attribute order is not guaranteed.
+  //
+  // The delimiter is CAPTURED and back-referenced rather than accepting
+  // either quote at both ends. Writing the value as [^"']* ends it at the
+  // first apostrophe INSIDE the content, which is not a delimiter at all:
+  // cphfood.vn's og:title is "Lá Rong Biển K'WOOK 240G 100 Lá" and arrived as
+  // "Lá Rong Biển K". Vietnamese product titles carry apostrophes often -
+  // K'WOOK, K-WOOK'S - so this silently shortened titles on exactly the
+  // sources most likely to use them.
   const patterns = [
-    new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]*content=["']([^"']*)["']`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${key}["']`, "i"),
+    new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]*content=(["'])([\\s\\S]*?)\\1`, "i"),
+    new RegExp(`<meta[^>]+content=(["'])([\\s\\S]*?)\\1[^>]*(?:property|name)=["']${key}["']`, "i"),
   ];
   for (const re of patterns) {
     const m = re.exec(html);
-    if (m?.[1]) return m[1].trim();
+    if (m?.[2]) return m[2].trim();
   }
   return null;
 }
