@@ -211,3 +211,27 @@ describe("looksLikeChallenge", () => {
     expect(looksLikeChallenge(html, parseProductPage(html))).toBe(false);
   });
 });
+
+describe("meta titles containing an apostrophe", () => {
+  // Verbatim shape from cphfood.vn, found by the probe: the title arrived as
+  // "Lá Rong Biển K" because the old pattern treated the apostrophe in K'WOOK
+  // as the closing delimiter.
+  const html = `<html><head>
+    <meta property="og:title" content="Lá Rong Biển K'WOOK 240G 100 Lá | CPH FOOD">
+    <meta property="product:price:amount" content="280000">
+  </head><body></body></html>`;
+
+  it("keeps the whole title", () => {
+    expect(parseProductPage(html).title).toBe("Lá Rong Biển K'WOOK 240G 100 Lá | CPH FOOD");
+  });
+
+  it("still reads the price", () => {
+    expect(parseProductPage(html).priceVnd).toBe(280_000);
+  });
+
+  it("handles single-quoted attributes carrying a double quote", () => {
+    const q = `<html><head><meta property='og:title' content='Rong biển "gói to" 400g'>
+      <meta property='og:price:amount' content='190000'></head></html>`;
+    expect(parseProductPage(q).title).toBe('Rong biển "gói to" 400g');
+  });
+});
