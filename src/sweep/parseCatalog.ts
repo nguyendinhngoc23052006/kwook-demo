@@ -55,11 +55,21 @@ export function mentionsKwook(title: string): boolean {
     .includes("kwook");
 }
 
-/** A finite, positive number, or null. Guards every price on the way in. */
+/**
+ * A finite, positive number of đồng, or null. Guards every price on the way in.
+ *
+ * The result is checked AFTER dividing, not only before. Guarding the input
+ * alone lets a value that is positive but rounds away survive as 0 - money("30",
+ * 100) is 0.3 đồng, which passes `n > 0` and then rounds to 0. A 0 đ price is
+ * worse than no price: `in_stock` reads it as present, and every detector
+ * comparing against it divides by a min of zero. Null is the honest answer for
+ * an amount too small to represent.
+ */
 function money(v: unknown, divisor = 1): number | null {
   const n = typeof v === "string" ? Number.parseFloat(v) : typeof v === "number" ? v : Number.NaN;
   if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n / divisor);
+  const vnd = Math.round(n / divisor);
+  return vnd > 0 ? vnd : null;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>

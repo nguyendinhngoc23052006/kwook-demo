@@ -131,6 +131,16 @@ describe("parseCatalog", () => {
     expect(parseCatalog(odd, "https://cphfood.vn")[0].originalPriceVnd).toBeNull();
   });
 
+  it("returns null, never 0, for an amount that rounds away", () => {
+    // Caught in review: guarding the INPUT alone let 0.3 đồng survive as 0,
+    // and a 0 đ price is worse than no price - in_stock reads it as present
+    // and every spread divides by a min of zero.
+    const tiny = JSON.stringify([
+      { name: "z", permalink: "/z", prices: { price: "30", currency_minor_unit: 2 } },
+    ]);
+    expect(parseCatalog(tiny, "https://shop.example")[0].priceVnd).toBeNull();
+  });
+
   it("returns [] for junk rather than throwing - a changed API costs one source", () => {
     expect(parseCatalog("<html>nope</html>", "https://x.vn")).toEqual([]);
     expect(parseCatalog("{}", "https://x.vn")).toEqual([]);
