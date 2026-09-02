@@ -1,0 +1,50 @@
+# Does this URL actually give us a price? Ask before committing it.
+#
+# A source row that 404s, or answers 200 with a bot-challenge page, costs a
+# fetch every hour forever and shows on the dashboard as a dead source. Five
+# URLs were once added straight from a search-results page without being
+# opened; one of them worked, and the other four had to be deleted by
+# migration. This workflow exists so that cannot happen twice.
+#
+# It must run HERE rather than on a developer's machine. Vietnamese
+# e-commerce sites reject the sandbox Claude works in (CONNECT 403), while the
+# GitHub runner fetches them fine - the hourly sweep gets 3/3 sources from
+# this same network. So the runner is the only place where "it works" means
+# anything, and a URL that passes here will behave the same way in a sweep:
+# same fetcher, same parser, same code.
+#
+# Manual only. No secrets, no database writes - it reads public pages and
+# prints what it found.
+name: probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "URLs to probe, separated by spaces or newlines"
+        required: true
+
+jobs:
+  probe:
+    name: probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "lts/*"
+          cache: npm
+      - run: npm ci || npm install
+      - name: Fetch and parse each URL
+        env:
+          URLS: ${{ inputs.urls }}
+        run: |
+          set -u
+          # Unquoted on purpose: the input is a whitespace-separated list and
+          # word splitting is exactly what turns it into arguments. URLs
+          # contain no spaces, so nothing is lost.
+          # shellcheck disable=SC2086
+          npm run probe -- $URLS
