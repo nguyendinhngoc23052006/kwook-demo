@@ -8,7 +8,8 @@
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "sweep": "tsx src/sweep/run.ts"
+    "sweep": "tsx src/sweep/run.ts",
+    "probe": "tsx scripts/probe.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
