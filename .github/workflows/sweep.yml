@@ -142,14 +142,31 @@ jobs:
       # repo has to keep time. sweep-watchdog.yml is the recovery path and only
       # acts when this chain is already dead.
       #
-      # `if: success()` is load-bearing, not tidiness. A cancelled run must
-      # dispatch NOTHING: the run that cancelled it is already running, and a
-      # dying run that booked a successor would have that successor cancel its
-      # own canceller - forever, with no sweep ever completing. A failed run is
-      # silent for the same reason it is safe: the watchdog's cron picks the
-      # chain back up within 30 minutes.
+      # The condition is `!cancelled()`, and each half of that is load-bearing.
+      #
+      # NOT ON CANCEL: the run that cancelled this one is already running, and
+      # a dying run that booked a successor would have that successor cancel
+      # its own canceller - forever, with no sweep ever completing. This also
+      # covers a runaway job: `timeout-minutes` is documented as GitHub
+      # "automatically cancels it", so a job that overruns hands off nothing,
+      # which is correct - it has already held the slot for hours.
+      #
+      # BUT ON FAILURE: this used to read `if: success()`, and that is what
+      # actually stopped the pipeline on 2026-09-02. Run 29 swept four hours
+      # correctly and exited failed only because Gemini had not answered
+      # twice; the handoff was skipped, and the chain was dead until a human
+      # looked. A run's job is to book its successor - whether its own sweeps
+      # went well has nothing to do with whether the next hour should happen.
+      # The failure is still reported: the step below opens the issue, and the
+      # run's conclusion is still `failure`.
+      #
+      # `!cancelled()` is GitHub's own documented recommendation for "run
+      # regardless of success or failure", in preference to `always()`.
+      # Verified: 2026-09-02, docs.github.com "Evaluate expressions in
+      # workflows and actions" (status check functions) and workflow-syntax
+      # `jobs.<job_id>.timeout-minutes`.
       - name: Hand off to the next run
-        if: success()
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
