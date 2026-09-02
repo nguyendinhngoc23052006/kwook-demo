@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { byVersionDesc, decide, replacementFrom } from "./gemini.js";
+import { byVersionDesc, decide, outOfTime, replacementFrom } from "./gemini.js";
 import { proposeResolutions } from "./propose.js";
 
 const saved = process.env.GEMINI_API_KEY;
@@ -92,5 +92,21 @@ describe("decide", () => {
 
   it("accepts any 2xx", () => {
     expect(decide(200)).toBe("ok");
+  });
+});
+
+describe("outOfTime", () => {
+  it("is false while the deadline is still ahead", () => {
+    expect(outOfTime(1_000, 999)).toBe(false);
+  });
+
+  it("is true at the deadline, not just past it", () => {
+    // The walk checks before starting a request, so the boundary must stop
+    // it rather than let one more 30s attempt through.
+    expect(outOfTime(1_000, 1_000)).toBe(true);
+  });
+
+  it("is true once the deadline has passed", () => {
+    expect(outOfTime(1_000, 1_001)).toBe(true);
   });
 });

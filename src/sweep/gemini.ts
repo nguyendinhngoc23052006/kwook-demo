@@ -21,6 +21,31 @@ const MAX_CANDIDATES = 4;
 const RETRY_DELAY_MS = 2_000;
 
 /**
+ * Two clocks, because a sweep must never be held open by a model.
+ *
+ * Node's fetch has NO default timeout. A server that accepts the connection
+ * and then stalls holds the request until the OS gives up, which can be many
+ * minutes - and this file makes up to nine requests per call (one ListModels,
+ * then four candidates with a retry each), twice per sweep. That is how a
+ * 3-4 minute sweep became 8 minutes and then stopped finishing at all. The
+ * scraper in fetchSource.ts has had a 20s AbortController since it was
+ * written; these calls quietly did not.
+ *
+ * REQUEST bounds one HTTP call. BUDGET bounds the whole walk, because nine
+ * requests that each answer just inside the per-request limit are as bad as
+ * one that hangs. The model is an assist: when the budget is spent the sweep
+ * keeps its observations, its findings and its cadence, and simply goes
+ * without an opinion this hour.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+const BUDGET_MS = 90_000;
+
+/** Kept pure so the budget is testable without waiting for one. */
+export function outOfTime(deadline: number, now = Date.now()): boolean {
+  return now >= deadline;
+}
+
+/**
  * What to do about an HTTP status, kept separate so the policy is testable
  * without a network.
  *
@@ -47,7 +72,9 @@ export async function listModels(apiKey: string): Promise<string[]> {
   const override = process.env.GEMINI_MODEL;
   if (override) return [override];
 
-  const res = await fetch(`${API}/models?key=${apiKey}&pageSize=200`);
+  const res = await fetch(`${API}/models?key=${apiKey}&pageSize=200`, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`listing models failed: HTTP ${res.status}`);
 
   const body = (await res.json()) as {
@@ -121,6 +148,9 @@ export async function askForJson<T>(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
+  // The clock starts before ListModels, because that call can stall too.
+  const deadline = Date.now() + BUDGET_MS;
+
   const candidates = await listModels(apiKey);
   if (candidates.length === 0) {
     throw new Error("no Gemini model supports generateContent for this key");
@@ -148,18 +178,43 @@ export async function askForJson<T>(
   let used = "";
   let res: Response | undefined;
 
+  // Every attempt carries its own signal: one AbortSignal cannot be reused
+  // across requests, and a shared one would abort the retry the moment the
+  // first attempt's clock ran out.
+  const send = () =>
+    fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, {
+      ...request,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
   while (queue.length > 0) {
+    if (outOfTime(deadline)) {
+      failures.push(`budget of ${BUDGET_MS}ms spent with ${queue.length} candidate(s) untried`);
+      break;
+    }
+
     const model = queue.shift();
     if (!model) break;
     used = model;
 
-    let attempt = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+    // A timed-out request throws rather than returning a status, so it is
+    // caught here and treated as this candidate failing - the same as a 500.
+    // Letting it escape would abandon the remaining candidates over one slow
+    // server, which is the opposite of what the walk exists for.
+    let attempt: Response;
+    try {
+      attempt = await send();
 
-    // 503/429 are transient by definition. One short wait costs less than
-    // losing an hour of output.
-    if (decide(attempt.status) === "retry") {
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      attempt = await fetch(`${API}/models/${used}:generateContent?key=${apiKey}`, request);
+      // 503/429 are transient by definition. One short wait costs less than
+      // losing an hour of output - but not when the budget is already gone.
+      if (decide(attempt.status) === "retry" && !outOfTime(deadline)) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        attempt = await send();
+      }
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      failures.push(`${used}: ${why}`);
+      continue;
     }
 
     if (attempt.ok) {
