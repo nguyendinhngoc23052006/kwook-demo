@@ -12,12 +12,88 @@
  *   npm run probe -- https://example.com/product-a https://example.com/product-b
  */
 import { fetchPage } from "../src/sweep/fetchSource.js";
+import { parseCatalog, parseKwookCatalog } from "../src/sweep/parseCatalog.js";
 import { looksLikeChallenge, parseProductPage } from "../src/sweep/parseProduct.js";
 
 const urls = process.argv.slice(2).filter((a) => a.startsWith("http"));
 if (urls.length === 0) {
-  console.error("usage: npm run probe -- <url> [url...]");
+  console.error("usage: npm run probe -- [--peek] <url> [url...]");
   process.exit(2);
+}
+
+/**
+ * --peek prints what came back instead of judging it.
+ *
+ * The verdict mode below answers "can the product parser read this page?",
+ * which is the right question for a product URL and the wrong one for
+ * anything else. Catalogue endpoints - Shopify's /products.json, Sapo's copy
+ * of it, WooCommerce's Store API - are the shape worth having, because one
+ * request returns a whole shop rather than one item. Judging those with a
+ * single-product parser would report NO PRICE on exactly the URLs worth
+ * adding.
+ *
+ * The excerpt is bounded and goes to the job log rather than an artifact:
+ * this repo's only window onto these hosts is the runner, since the sandbox
+ * Claude works in is refused by every Vietnamese e-commerce site (CONNECT
+ * 403), and a log is readable from there without downloading anything.
+ */
+const peek = process.argv.includes("--peek");
+
+/**
+ * --catalog runs the real catalogue parser and reports the YIELD.
+ *
+ * The number that decides whether a catalogue endpoint is worth adding is not
+ * "did it return JSON" but "how many Kwook products are in it", and that
+ * cannot be answered from this sandbox: the hosts refuse it. So the same
+ * parser the sweep will use is run here, on the runner, and prints what it
+ * found - which also checks the money conversion against prices already known
+ * from the single-page sources.
+ */
+const catalog = process.argv.includes("--catalog");
+
+if (catalog) {
+  let total = 0;
+  for (const url of urls) {
+    const res = await fetchPage(url);
+    if (!res.ok) {
+      console.log(`DEAD      ${url}\n          fetch failed: ${res.error}\n`);
+      continue;
+    }
+    const all = parseCatalog(res.html, url);
+    const kwook = parseKwookCatalog(res.html, url);
+    total += kwook.length;
+    console.log(`CATALOG   ${url}\n          ${all.length} products parsed, ${kwook.length} Kwook`);
+    for (const i of kwook) {
+      console.log(
+        `            ${i.priceVnd === null ? "no price" : `${i.priceVnd.toLocaleString("vi-VN")} đ`}` +
+          `${i.originalPriceVnd ? ` (was ${i.originalPriceVnd.toLocaleString("vi-VN")} đ)` : ""}` +
+          ` | ${i.title}\n            ${i.url}`,
+      );
+    }
+    console.log("");
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  console.log(`${total} Kwook listing(s) across ${urls.length} endpoint(s)`);
+  process.exit(0);
+}
+const PEEK_CHARS = 1600;
+
+if (peek) {
+  for (const url of urls) {
+    const res = await fetchPage(url);
+    if (!res.ok) {
+      console.log(`DEAD      ${url}\n          fetch failed: ${res.error}\n`);
+      continue;
+    }
+    const body = res.html;
+    const looksJson = body.trimStart().startsWith("{") || body.trimStart().startsWith("[");
+    console.log(
+      `OK        ${url}\n          ${body.length} chars, ${looksJson ? "JSON" : "not JSON"}\n` +
+        `--- first ${PEEK_CHARS} chars ---\n${body.slice(0, PEEK_CHARS)}\n--- end ---\n`,
+    );
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  process.exit(0);
 }
 
 let usable = 0;

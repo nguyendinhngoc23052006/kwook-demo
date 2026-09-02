@@ -7,7 +7,8 @@ import { runDetectors } from "./events.js";
 import { explainFindings, type FindingContext } from "./explain.js";
 import { fetchPage } from "./fetchSource.js";
 import { type SweepError, sweepFailed } from "./outcome.js";
-import { parseStoreIndex } from "./parse.js";
+import { type ParsedListing, parseStoreIndex } from "./parse.js";
+import { parseCatalog, parseKwookCatalog } from "./parseCatalog.js";
 import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
 import { proposeResolutions } from "./propose.js";
 import { type Product, resolveByAlias } from "./resolve.js";
@@ -20,7 +21,7 @@ if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY are requ
 const db = createClient(url, key, { auth: { persistSession: false } });
 
 type Src = { id: string; fetch_strategy: string; consecutive_failures: number };
-type Listing = { id: string; url: string; source_id: string };
+type Listing = { id: string; url: string; source_id: string; is_entry_point: boolean };
 
 const errors: SweepError[] = [];
 
@@ -48,7 +49,7 @@ if (sweepErr || !sweep) throw new Error(`could not open a sweep: ${sweepErr?.mes
 console.log(`sweep ${sweep.id} started`);
 
 const { data: sources } = await db.from("sources").select("*").eq("active", true);
-const { data: seeds } = await db.from("listing_urls").select("id,url,source_id");
+const { data: seeds } = await db.from("listing_urls").select("id,url,source_id,is_entry_point");
 const { data: productRows } = await db
   .from("products")
   .select("sku,aliases,reference_price_vnd,name_canonical,net_weight_g,pack_format");
@@ -65,7 +66,12 @@ const sourcesRead = new Set<string>();
 let observed = 0;
 
 for (const src of (sources ?? []) as Src[]) {
-  const entryPoints = ((seeds ?? []) as Listing[]).filter((l) => l.source_id === src.id);
+  // Only entry points. The other rows for a source are products a parse
+  // DISCOVERED - fetching those re-reads pages whose contents this sweep
+  // already has, and hands a product page to a parser expecting an index.
+  const entryPoints = ((seeds ?? []) as Listing[]).filter(
+    (l) => l.source_id === src.id && l.is_entry_point,
+  );
   if (entryPoints.length === 0) {
     // Not a failure and not an attempt: there is nothing to fetch until this
     // source has an entry point. Counting it as attempted would report it as
@@ -88,12 +94,51 @@ for (const src of (sources ?? []) as Src[]) {
     await mkdir("fixtures/raw", { recursive: true });
     await writeFile(`fixtures/raw/${src.id}.html`, res.html, "utf8");
 
-    if (src.fetch_strategy === "store_index") {
-      ok = true;
+    const manyPerFetch =
+      src.fetch_strategy === "store_index" || src.fetch_strategy === "catalog_json";
+
+    if (manyPerFetch) {
       // One fetch, many products - each gets its own listing_urls row so the
       // per-listing history the detectors need is actually per listing.
-      const parsed = parseStoreIndex(res.html);
-      console.log(`${src.id}: ${entry.url} -> ${parsed.length} listings parsed`);
+      let parsed: ParsedListing[];
+
+      if (src.fetch_strategy === "catalog_json") {
+        // A shop's own JSON catalogue. Two counts, because they mean
+        // different things: everything the endpoint returned tells us whether
+        // it still works, and the Kwook subset is what we keep. A catalogue
+        // holds the WHOLE shop, so most of it is other people's groceries.
+        const everything = parseCatalog(res.html, entry.url);
+        if (everything.length === 0) {
+          // Zero products from an endpoint whose whole job is listing them:
+          // the shape changed or this is not a catalogue. Not marking `ok`
+          // lets the three-strike rule retire it, which is the point.
+          console.log(`${src.id}: EMPTY ${entry.url} - no products parsed`);
+          errors.push({ source: src.id, url: entry.url, error: "catalogue parsed to 0 products" });
+          continue;
+        }
+        const kwook = parseKwookCatalog(res.html, entry.url);
+        console.log(
+          `${src.id}: ${entry.url} -> ${everything.length} products, ${kwook.length} Kwook`,
+        );
+        // A shop that stocks none this hour is healthy and empty, not broken -
+        // so `ok` is set on a readable catalogue, not on a non-zero yield.
+        ok = true;
+        parsed = kwook.map((i) => ({
+          itemId: i.sellerSku,
+          url: i.url,
+          title: i.title,
+          priceVnd: i.priceVnd,
+          originalPriceVnd: i.originalPriceVnd,
+          // The catalogue APIs carry none of these; null is the honest value.
+          discountPct: null,
+          unitsSold: null,
+          reviewCount: null,
+        }));
+      } else {
+        ok = true;
+        parsed = parseStoreIndex(res.html);
+        console.log(`${src.id}: ${entry.url} -> ${parsed.length} listings parsed`);
+      }
 
       for (const p of parsed) {
         const productUrl = p.url ?? `${entry.url}#${p.title}`;
@@ -115,6 +160,10 @@ for (const src of (sources ?? []) as Src[]) {
               resolved_by: hit?.method ?? null,
               out_of_scope: scope.outOfScope,
               out_of_scope_brand: scope.outOfScope ? scope.brand : null,
+              // is_entry_point is deliberately absent. On a new row the column
+              // default (false) applies; on an existing one PostgREST leaves
+              // the stored value alone, so a discovered product never demotes
+              // a URL that is genuinely an entry point.
             },
             { onConflict: "url" },
           )
