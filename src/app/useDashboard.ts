@@ -69,6 +69,7 @@ export type Dashboard = {
   sources: Source[];
   /** How many entry-point URLs each source has. Zero means nothing to fetch. */
   urlsBySource: Record<string, number>;
+  entryPointsBySource: Record<string, number>;
   /** Model proposals for listings exact matching could not place. */
   proposals: Proposal[];
 };
@@ -132,7 +133,7 @@ export function useDashboard(): State {
           .from("sources")
           .select("id,display_name,domain,active,consecutive_failures,last_success_at")
           .order("id"),
-        supabase.from("listing_urls").select("source_id"),
+        supabase.from("listing_urls").select("source_id,is_entry_point"),
         supabase
           .from("resolution_proposals")
           .select("listing_url_id,proposed_sku,confidence,reasoning,model"),
@@ -142,9 +143,22 @@ export function useDashboard(): State {
       if (urlsRes.error) throw new Error(urlsRes.error.message);
       if (proposalsRes.error) throw new Error(proposalsRes.error.message);
 
+      // Two counts, because a source has two different numbers and only one of
+      // them answers "is this configured?".
+      //
+      // An ENTRY POINT is a URL the sweep fetches. Everything else in this
+      // table is a product some parse discovered - kitbuy has one entry point
+      // and twenty-nine discovered products. Judging configuration by the
+      // total would call a source healthy when it has products on record and
+      // nothing left to fetch them with, which is precisely the state that
+      // stops it being swept.
+      const entryPointsBySource: Record<string, number> = {};
       const urlsBySource: Record<string, number> = {};
-      for (const row of urlsRes.data as { source_id: string }[]) {
+      for (const row of urlsRes.data as { source_id: string; is_entry_point: boolean }[]) {
         urlsBySource[row.source_id] = (urlsBySource[row.source_id] ?? 0) + 1;
+        if (row.is_entry_point) {
+          entryPointsBySource[row.source_id] = (entryPointsBySource[row.source_id] ?? 0) + 1;
+        }
       }
 
       let listings: ListingRow[] = [];
@@ -220,6 +234,7 @@ export function useDashboard(): State {
             events,
             sources: sourcesRes.data as Source[],
             urlsBySource,
+            entryPointsBySource,
             proposals: proposalsRes.data as Proposal[],
           },
         });

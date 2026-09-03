@@ -44,9 +44,10 @@ export function App() {
     events,
     sources,
     urlsBySource,
+    entryPointsBySource,
     proposals,
   } = state.data;
-  const unconfiguredSources = sources.filter((s) => (urlsBySource[s.id] ?? 0) === 0).length;
+  const unconfiguredSources = sources.filter((s) => (entryPointsBySource[s.id] ?? 0) === 0).length;
   const unresolved = listings.filter((l) => l.product_sku === null).length;
 
   const tabs: { id: Tab; label: string; pip?: number }[] = [
@@ -99,10 +100,16 @@ export function App() {
         ))}
       </nav>
 
-      {tab === "gia" && <BangGia listings={listings} products={products} />}
+      {tab === "gia" && <BangGia listings={listings} products={products} events={events} />}
       {tab === "canh-bao" && <CanhBao events={events} listings={listings} />}
       {tab === "dien-bien" && <DienBien sweepHistory={sweepHistory} history={history} />}
-      {tab === "nguon" && <Nguon sources={sources} urlsBySource={urlsBySource} />}
+      {tab === "nguon" && (
+        <Nguon
+          sources={sources}
+          urlsBySource={urlsBySource}
+          entryPointsBySource={entryPointsBySource}
+        />
+      )}
       {tab === "chua-khop" && <ChuaKhop listings={listings} proposals={proposals} />}
 
       <footer>
