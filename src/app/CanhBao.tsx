@@ -45,8 +45,11 @@ export function CanhBao({ events, listings }: { events: EventRow[]; listings: Li
                 <span className={`badge sev-${e.severity}`}>{e.severity}</span>
               </div>
               <div className="alert-subject">{subject}</div>
+              {/* new_seller has no previous value, and a bare "→ title" reads
+                  as a truncated line rather than a first sighting. */}
               <div className="alert-values">
-                {e.old_value} → <strong>{e.new_value}</strong>
+                {e.old_value !== null && `${e.old_value} → `}
+                <strong>{e.new_value}</strong>
               </div>
               {/* The model's sentence when there is one, the fixed
                   per-detector sentence when there is not. A sweep that ran

@@ -50,11 +50,29 @@ const { data: sweep, error: sweepErr } = await db.from("sweeps").insert({}).sele
 if (sweepErr || !sweep) throw new Error(`could not open a sweep: ${sweepErr?.message}`);
 console.log(`sweep ${sweep.id} started`);
 
-const { data: sources } = await db.from("sources").select("*").eq("active", true);
-const { data: seeds } = await db.from("listing_urls").select("id,url,source_id,is_entry_point");
-const { data: productRows } = await db
+// The sweep's own configuration. Reading it is not optional work, so unlike
+// every other query here these errors are kept rather than coalesced away: a
+// discarded error left `sources` null, which the loop below reads as "no
+// sources configured" and every check downstream reads as a quiet hour. See
+// the `load` stage in outcome.ts.
+const sourcesRes = await db.from("sources").select("*").eq("active", true);
+const seedsRes = await db.from("listing_urls").select("id,url,source_id,is_entry_point");
+const productsRes = await db
   .from("products")
   .select("sku,aliases,reference_price_vnd,name_canonical,net_weight_g,pack_format");
+for (const [what, res] of [
+  ["sources", sourcesRes],
+  ["listing_urls", seedsRes],
+  ["products", productsRes],
+] as const) {
+  if (res.error) {
+    errors.push({ stage: "load", error: `${what}: ${res.error.message}` });
+    console.error(`could not read ${what}: ${res.error.message}`);
+  }
+}
+const sources = sourcesRes.data;
+const seeds = seedsRes.data;
+const productRows = productsRes.data;
 const products = (productRows ?? []) as (Product & { reference_price_vnd: number | null })[];
 const referenceBySku = new Map(
   products.flatMap((p) => (p.reference_price_vnd ? [[p.sku, p.reference_price_vnd] as const] : [])),
@@ -253,8 +271,9 @@ for (const src of (sources ?? []) as Src[]) {
   }
 }
 
-// The one place a model is used, and it runs LAST - only on what exact
-// matching could not place, and only on listings without a proposal already.
+// The FIRST of the two places a model is used, and it runs after every rule
+// has had its say - only on what exact matching could not place, and only on
+// listings without a proposal already. The second is explainFindings below.
 // It writes an opinion with a confidence; a human confirms it. Nothing here
 // changes a price, a finding, or a product_sku.
 {
@@ -512,6 +531,11 @@ console.log(
 // notification failure never costs an hour of otherwise good data. A
 // dashboard is pull; this is the push that makes the pipeline visible to
 // someone who is not looking at it.
+// The verdict is decided BEFORE the message is written, so the message can
+// lead with it. A failed sweep that reports its counts without saying it
+// failed reads exactly like a quiet market.
+const fatal = sweepFailed(errors, { sourcesAttempted, sourcesOk });
+
 const report = buildReport({
   startedAt: new Date(sweep.started_at ?? Date.now()),
   sourcesOk,
@@ -519,6 +543,7 @@ const report = buildReport({
   listings: observed,
   findings: reportFindings,
   degraded: errors.length,
+  failure: fatal,
   dashboardUrl: process.env.DASHBOARD_URL ?? null,
 });
 const notified = await sendReport(report);
@@ -533,8 +558,7 @@ if (errors.length) {
 // Exit on what the sweep failed to DO, not on everything it noticed. The
 // hourly chain is handed off by this process's own run, so a non-zero exit
 // here is what stops the clock - see outcome.ts for why that distinction had
-// to be drawn.
-const fatal = sweepFailed(errors, { sourcesAttempted, sourcesOk });
+// to be drawn. Decided above, because the report has to say it too.
 if (fatal) {
   console.error(`sweep failed: ${fatal}`);
   process.exit(1);

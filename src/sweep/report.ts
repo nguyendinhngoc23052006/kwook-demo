@@ -39,6 +39,16 @@ export type ReportInput = {
   findings: ReportFinding[];
   /** Recorded but survivable problems - a shop down, the model busy. */
   degraded: number;
+  /**
+   * Why this sweep failed outright, or null if it did not.
+   *
+   * Present because the worst message this bot can send is a calm one. A
+   * sweep that could not read its own configuration observes nothing, finds
+   * nothing, and without this would report "0 listing - no alerts this hour"
+   * in the same shape as a genuinely quiet market. Silence and calm have to
+   * look different, so a failure takes over the top of the message.
+   */
+  failure?: string | null;
   dashboardUrl?: string | null;
 };
 
@@ -90,6 +100,7 @@ function hhmm(d: Date): string {
 export function buildReport(input: ReportInput): string {
   const { findings } = input;
   const high = findings.filter((f) => f.severity === "high").length;
+  const failed = input.failure != null && input.failure !== "";
 
   const head = [
     `GIÁ SÀN · ${hhmm(input.startedAt)}`,
@@ -97,12 +108,23 @@ export function buildReport(input: ReportInput): string {
       `${findings.length} cảnh báo${high > 0 ? ` (${high} nghiêm trọng)` : ""}`,
   ];
 
-  if (input.degraded > 0) {
+  // A failed sweep says so on its second line, before any count can be read
+  // as a result. The numbers stay - they are evidence of the failure, not a
+  // summary of the market.
+  if (failed) {
+    head.push(`LƯỢT QUÉT HỎNG — ${input.failure}`);
+  } else if (input.degraded > 0) {
+    // Only claim the data was kept when the sweep actually kept any.
     head.push(`${input.degraded} sự cố đã ghi nhận — dữ liệu vẫn được lưu.`);
   }
 
   if (findings.length === 0) {
-    head.push("", "Không có cảnh báo nào giờ này.");
+    head.push(
+      "",
+      failed
+        ? "Không có dữ liệu giờ này — con số ở trên không phản ánh thị trường."
+        : "Không có cảnh báo nào giờ này.",
+    );
     return withLink(head.join("\n"), input.dashboardUrl);
   }
 

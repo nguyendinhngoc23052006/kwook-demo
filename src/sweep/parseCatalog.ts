@@ -111,7 +111,14 @@ export function parseCatalog(body: string, pageUrl: string): CatalogItem[] {
   if (Array.isArray(doc)) {
     return doc.filter(isRecord).flatMap((p) => {
       const prices = isRecord(p.prices) ? p.prices : {};
-      const minor = typeof prices.currency_minor_unit === "number" ? prices.currency_minor_unit : 0;
+      // A shop's JSON is untrusted input like any other. currency_minor_unit
+      // is meant to be a small non-negative integer; anything else makes the
+      // divisor a fraction, and dividing by a fraction MULTIPLIES - 10.800 đ
+      // would be published as 108.000 đ with no error anywhere. Reject the
+      // malformed value and treat the price as already in đồng.
+      const raw = prices.currency_minor_unit;
+      const minor =
+        typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= 4 ? raw : 0;
       const divisor = 10 ** minor;
       const title = typeof p.name === "string" ? p.name : "";
       if (title === "") return [];

@@ -48,7 +48,10 @@ export function App() {
     proposals,
   } = state.data;
   const unconfiguredSources = sources.filter((s) => (entryPointsBySource[s.id] ?? 0) === 0).length;
-  const unresolved = listings.filter((l) => l.product_sku === null).length;
+  // The same predicate Chưa khớp itself uses. An out-of-scope listing is a
+  // decision already taken (it is another brand), not a listing awaiting one,
+  // so counting it here made the badge read 15 while the tab listed 12.
+  const unresolved = listings.filter((l) => l.product_sku === null && !l.out_of_scope).length;
 
   const tabs: { id: Tab; label: string; pip?: number }[] = [
     { id: "gia", label: "Bảng giá" },

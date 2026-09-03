@@ -76,9 +76,9 @@ product page through its JSON-LD, meta tags or WooCommerce markup.
 Only URLs marked `is_entry_point` are fetched. The rest are products a parse
 discovered, and re-fetching those would re-read pages the sweep already has.
 None of it uses a model, so an hourly cadence costs nothing and cannot drift
-between runs. A model is used exactly
-once per sweep, at the very end, on the residue the rules could not resolve
-(see **Where the model is used** below).
+between runs. A model is used twice per sweep, both times after the rules have
+finished — once on the residue they could not resolve, once to put the
+findings they produced into Vietnamese (see **Where the model is used** below).
 
 Parsing marketplace HTML has two traps this handles explicitly:
 

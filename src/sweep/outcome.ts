@@ -27,13 +27,22 @@ export type SweepError = {
 /**
  * The stages that ARE the sweep's own job.
  *
- * Only `events` qualifies: the findings are the output, and a sweep that
+ * `events` qualifies because the findings are the output: a sweep that
  * observed the market but could not record what it concluded has produced
  * nothing. `propose` and `explain` are deliberately absent - both are model
  * assists that add to a result which is already complete and already correct
  * without them, which is the whole reason they run last.
+ *
+ * `load` was added after the reverse case was found: the sweep could not read
+ * its own configuration. The queries for sources, seeds and products
+ * discarded their errors, so a database that answered nothing produced an
+ * empty source list, zero attempts, zero findings - and every downstream
+ * check read that as a quiet hour. The job went green, no issue opened, and
+ * the hourly report announced "no alerts". A sweep that never learned what to
+ * watch has not had a quiet hour; it has failed before starting, and that is
+ * the one failure mode nobody would have questioned.
  */
-const FATAL_STAGES = new Set(["events"]);
+const FATAL_STAGES = new Set(["events", "load"]);
 
 /**
  * The reason this sweep should exit non-zero, or null if it should not.

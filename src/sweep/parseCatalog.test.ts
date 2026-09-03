@@ -157,3 +157,31 @@ describe("parseKwookCatalog", () => {
     expect(parseKwookCatalog(woo, "https://abby.vn")).toHaveLength(1);
   });
 });
+
+describe("a shop's JSON is untrusted", () => {
+  const wrap = (prices: Record<string, unknown>) =>
+    JSON.stringify([{ name: "Rong biển K-WOOK 4.5g", prices }]);
+
+  it("divides by the minor unit when it is well formed", () => {
+    const [item] = parseCatalog(wrap({ price: "10800", currency_minor_unit: 2 }), "https://s.vn/x");
+    expect(item?.priceVnd).toBe(108);
+  });
+
+  it("refuses a negative minor unit rather than multiplying the price", () => {
+    // 10 ** -1 is 0.1, and dividing by 0.1 is multiplying by ten: this used
+    // to publish 10.800 đ as 108.000 đ, silently and confidently.
+    const [item] = parseCatalog(
+      wrap({ price: "10800", currency_minor_unit: -1 }),
+      "https://s.vn/x",
+    );
+    expect(item?.priceVnd).toBe(10800);
+  });
+
+  it("refuses a fractional minor unit", () => {
+    const [item] = parseCatalog(
+      wrap({ price: "10800", currency_minor_unit: 1.5 }),
+      "https://s.vn/x",
+    );
+    expect(item?.priceVnd).toBe(10800);
+  });
+});
