@@ -132,15 +132,28 @@ function parseWooCommerce(html: string): ParsedProduct | null {
   const found = amounts.filter((n): n is number => n !== null);
   if (found.length === 0) return null;
 
-  // A sale renders <del>old</del><ins>new</ins>: the LAST amount is what the
-  // buyer pays. With no <del> there is one amount and it is the price.
+  // A sale renders the old price in <del> and the new one in <ins>. Read the
+  // TAGS, not the order they happen to appear in: taking "the last amount"
+  // was right only because WooCommerce core emits <del> first, which is a
+  // property of one template rather than of the markup. A theme that renders
+  // <ins> first would have made this quietly report the crossed-out price as
+  // what the buyer pays - a wrong number, which is worse here than no number.
   const onSale = /<del[\s>]/i.test(block);
-  const price = onSale ? (found.at(-1) ?? null) : (found[0] ?? null);
+  const inTag = (tag: string): number | null => {
+    const inner = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i").exec(block)?.[1];
+    if (inner === undefined) return null;
+    const m = /woocommerce-Price-amount[^>]*>\s*<bdi>\s*([\d.,]+)/i.exec(inner);
+    return m?.[1] === undefined ? null : parsePriceLoose(m[1]);
+  };
+  const sale = onSale ? inTag("ins") : null;
+  const anchor = onSale ? inTag("del") : null;
+  // Fall back to position only when the tags carry no amount of their own.
+  const price = onSale ? (sale ?? found.at(-1) ?? null) : (found[0] ?? null);
 
   return {
     title: decodeEntities(titleMatch[1]?.replace(/<[^>]*>/g, "") ?? "") || null,
     priceVnd: price,
-    originalPriceVnd: onSale && found.length > 1 ? (found[0] ?? null) : null,
+    originalPriceVnd: onSale ? (anchor ?? (found.length > 1 ? (found[0] ?? null) : null)) : null,
     brandString: null,
     method: "woocommerce",
   };

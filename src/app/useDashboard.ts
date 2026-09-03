@@ -77,14 +77,22 @@ export type Dashboard = {
 /**
  * How far back the history screen reads — a day at the hourly cadence.
  *
- * The bound is not cosmetic. PostgREST caps a response at 1000 rows by
- * default, and a truncated history does not merely show less: the missing
- * rows read as gaps, so changesBetween would compare across them and invent
- * moves that never happened. 24 sweeps x 29 listings leaves headroom under
- * that cap. If the catalogue grows past ~40 listings, lower this or page the
- * query — do not just raise it.
+ * This is now a display choice rather than a safety limit. It used to be
+ * both, and the second job was the dangerous one: PostgREST caps a response
+ * at 1000 rows, and a truncated history does not merely show less — the
+ * missing rows read as gaps, so changesBetween compares across them and
+ * reports price moves that never happened.
+ *
+ * That bound was hand-fitted to a catalogue of 29 listings and left to rot.
+ * The catalogue reached 42, which put this query at 987 of the 1000 rows —
+ * thirteen short of inventing prices on screen, with no test and no error to
+ * announce it. readHistory below pages instead, so the cap cannot be reached
+ * at any catalogue size and this number can be changed freely again.
  */
 const HISTORY_SWEEPS = 24;
+
+/** PostgREST's default ceiling on one response. */
+const PAGE_ROWS = 1000;
 
 type State =
   | { status: "loading" }
@@ -107,6 +115,41 @@ type ObservationJoin = {
     out_of_scope_brand: string | null;
   } | null;
 };
+
+type HistoryJoin = Omit<Snapshot, "source_id" | "product_sku"> & {
+  listing_urls: { source_id: string; product_sku: string | null } | null;
+};
+
+/**
+ * Every history row for these sweeps, read a page at a time.
+ *
+ * Ordered by (observed_at, listing_url_id) because paging without a total
+ * order is not paging: rows can repeat or vanish between pages when the
+ * server is free to choose a different order each time. The pair is unique
+ * per row, so the sequence is stable.
+ *
+ * A page shorter than the limit is the last page — that is the only stop
+ * condition, so growth in the catalogue costs another request rather than
+ * silently costing rows.
+ */
+async function readHistory(sweepIds: string[]): Promise<HistoryJoin[]> {
+  const rows: HistoryJoin[] = [];
+  for (let from = 0; ; from += PAGE_ROWS) {
+    const { data, error } = await supabase
+      .from("observations")
+      .select(
+        "listing_url_id,sweep_id,observed_at,title_seen,price_vnd,units_sold,listing_urls(source_id,product_sku)",
+      )
+      .in("sweep_id", sweepIds)
+      .order("observed_at", { ascending: true })
+      .order("listing_url_id", { ascending: true })
+      .range(from, from + PAGE_ROWS - 1);
+    if (error) throw new Error(error.message);
+    const page = (data ?? []) as unknown as HistoryJoin[];
+    rows.push(...page);
+    if (page.length < PAGE_ROWS) return rows;
+  }
+}
 
 export function useDashboard(): State {
   const [state, setState] = useState<State>({ status: "loading" });
@@ -166,7 +209,7 @@ export function useDashboard(): State {
       let history: Snapshot[] = [];
 
       if (sweep) {
-        const [obsRes, eventsRes, historyRes] = await Promise.all([
+        const [obsRes, eventsRes, historyRows] = await Promise.all([
           supabase
             .from("observations")
             .select(
@@ -179,23 +222,11 @@ export function useDashboard(): State {
               "id,type,severity,product_sku,listing_url_id,old_value,new_value,explanation,explained_by",
             )
             .eq("sweep_id", sweep.id),
-          supabase
-            .from("observations")
-            .select(
-              "listing_url_id,sweep_id,observed_at,title_seen,price_vnd,units_sold,listing_urls(source_id,product_sku)",
-            )
-            .in(
-              "sweep_id",
-              sweepHistory.map((s) => s.id),
-            ),
+          readHistory(sweepHistory.map((s) => s.id)),
         ]);
         if (obsRes.error) throw new Error(obsRes.error.message);
         if (eventsRes.error) throw new Error(eventsRes.error.message);
-        if (historyRes.error) throw new Error(historyRes.error.message);
-        type HistoryJoin = Omit<Snapshot, "source_id" | "product_sku"> & {
-          listing_urls: { source_id: string; product_sku: string | null } | null;
-        };
-        history = (historyRes.data as unknown as HistoryJoin[]).map((r) => ({
+        history = historyRows.map((r) => ({
           listing_url_id: r.listing_url_id,
           sweep_id: r.sweep_id,
           observed_at: r.observed_at,

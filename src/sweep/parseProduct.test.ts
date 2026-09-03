@@ -235,3 +235,33 @@ describe("meta titles containing an apostrophe", () => {
     expect(parseProductPage(q).title).toBe('Rong biển "gói to" 400g');
   });
 });
+
+describe("a WooCommerce sale, whichever way the theme orders it", () => {
+  const page = (inner: string) => `
+    <h1 class="product_title entry-title">Lá rong biển KWOOK 10 lá</h1>
+    <p class="price">${inner}</p>`;
+  const del = '<del><span class="woocommerce-Price-amount"><bdi>50.000</bdi></span></del>';
+  const ins = '<ins><span class="woocommerce-Price-amount"><bdi>40.000</bdi></span></ins>';
+
+  it("reads the sale price when <del> comes first", () => {
+    const got = parseProductPage(page(del + ins));
+    expect(got?.priceVnd).toBe(40000);
+    expect(got?.originalPriceVnd).toBe(50000);
+  });
+
+  it("still reads the sale price when <ins> comes first", () => {
+    // Position alone would report 50.000 here - the crossed-out price - and
+    // nothing downstream could tell that from a real price rise.
+    const got = parseProductPage(page(ins + del));
+    expect(got?.priceVnd).toBe(40000);
+    expect(got?.originalPriceVnd).toBe(50000);
+  });
+
+  it("takes the only amount when nothing is on sale", () => {
+    const got = parseProductPage(
+      page('<span class="woocommerce-Price-amount"><bdi>34.560</bdi></span>'),
+    );
+    expect(got?.priceVnd).toBe(34560);
+    expect(got?.originalPriceVnd).toBeNull();
+  });
+});

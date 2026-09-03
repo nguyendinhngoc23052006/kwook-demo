@@ -94,3 +94,42 @@ describe("buildReport", () => {
     expect(text).toContain("cảnh báo");
   });
 });
+
+describe("a broken sweep must not read like a quiet one", () => {
+  const base = {
+    startedAt: new Date("2026-09-03T11:30:00Z"),
+    sourcesOk: 0,
+    sourcesAttempted: 0,
+    listings: 0,
+    findings: [],
+    degraded: 1,
+  };
+
+  it("leads with the failure instead of reporting calm", () => {
+    const msg = buildReport({
+      ...base,
+      failure: "could not record this sweep's findings (load)",
+    });
+    expect(msg).toContain("LƯỢT QUÉT HỎNG");
+    expect(msg).not.toContain("Không có cảnh báo nào giờ này");
+    expect(msg).toContain("không phản ánh thị trường");
+  });
+
+  it("never claims the data was kept when the sweep kept none", () => {
+    const msg = buildReport({ ...base, failure: "every source failed (0 of 7)" });
+    expect(msg).not.toContain("dữ liệu vẫn được lưu");
+  });
+
+  it("still reads as a quiet hour when the sweep genuinely worked", () => {
+    const msg = buildReport({
+      ...base,
+      sourcesOk: 7,
+      sourcesAttempted: 7,
+      listings: 42,
+      degraded: 0,
+      failure: null,
+    });
+    expect(msg).toContain("Không có cảnh báo nào giờ này");
+    expect(msg).not.toContain("LƯỢT QUÉT HỎNG");
+  });
+});

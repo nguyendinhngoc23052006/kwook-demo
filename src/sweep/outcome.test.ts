@@ -51,3 +51,22 @@ describe("sweepFailed", () => {
     expect(sweepFailed(errors, ok)).toContain("events");
   });
 });
+
+describe("a sweep that never learned what to watch", () => {
+  it("treats a failed configuration read as fatal", () => {
+    // Zero attempts is the tell: without this the sweep exits 0, the job goes
+    // green, no issue opens, and the hourly report announces no alerts.
+    expect(
+      sweepFailed([{ stage: "load", error: "sources: JWT expired" }], {
+        sourcesAttempted: 0,
+        sourcesOk: 0,
+      }),
+    ).toContain("load");
+  });
+
+  it("still lets a model outage through", () => {
+    expect(
+      sweepFailed([{ stage: "explain", error: "503" }], { sourcesAttempted: 7, sourcesOk: 7 }),
+    ).toBeNull();
+  });
+});
