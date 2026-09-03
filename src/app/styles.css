@@ -270,3 +270,43 @@ h2.section:first-child {
   border-left: 2px solid var(--accent);
   padding-left: 0.6rem;
 }
+
+/* The verdict badges on Bảng giá — why this spread matters, next to the
+   spread itself rather than a tab away. */
+.spread .why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  justify-content: flex-end;
+  margin-top: 0.35rem;
+}
+
+/* Tables scroll inside their own box rather than pushing the page sideways.
+   The widest here is six columns, which fits a 1440px screen and did not fit
+   a 1280px laptop - so it silently overflowed on exactly the machine this is
+   most likely to be opened on. A scroll container is the fix that keeps every
+   column readable instead of shrinking text until it is not. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-x > table {
+  min-width: 34rem;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 0.75rem;
+  }
+  /* Header and spread stack instead of fighting for one line. */
+  .sku header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
+  .spread,
+  .spread .why {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}

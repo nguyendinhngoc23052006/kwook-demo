@@ -38,59 +38,61 @@ export function ChuaKhop({
           </>
         )}
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Tiêu đề quan sát được</th>
-            <th className="num">Giá</th>
-            <th>Nguồn</th>
-            <th>Đề xuất của mô hình</th>
-          </tr>
-        </thead>
-        <tbody>
-          {unresolved.map((l) => {
-            const p = proposalFor.get(l.listing_url_id);
-            const unsure = p !== undefined && (p.confidence ?? 0) < NEEDS_A_HUMAN;
-            return (
-              <tr key={l.listing_url_id}>
-                <td>
-                  {l.url ? (
-                    <a href={l.url} target="_blank" rel="noreferrer">
-                      {l.title_seen ?? "(không có tiêu đề)"}
-                    </a>
-                  ) : (
-                    (l.title_seen ?? "(không có tiêu đề)")
-                  )}
-                </td>
-                <td className="num">{vnd(l.price_vnd)}</td>
-                <td>{l.source_id}</td>
-                <td>
-                  {p === undefined ? (
-                    <span className="muted">chưa có đề xuất</span>
-                  ) : (
-                    <div className="proposal">
-                      <div>
-                        {p.proposed_sku === null ? (
-                          <strong className="warn">không khớp sku nào</strong>
-                        ) : (
-                          <strong>{p.proposed_sku}</strong>
-                        )}
-                        {p.confidence !== null && (
-                          <span className={unsure ? "badge sev-medium" : "badge"}>
-                            {Math.round(p.confidence * 100)}%
-                          </span>
-                        )}
+      <div className="scroll-x">
+        <table>
+          <thead>
+            <tr>
+              <th>Tiêu đề quan sát được</th>
+              <th className="num">Giá</th>
+              <th>Nguồn</th>
+              <th>Đề xuất của mô hình</th>
+            </tr>
+          </thead>
+          <tbody>
+            {unresolved.map((l) => {
+              const p = proposalFor.get(l.listing_url_id);
+              const unsure = p !== undefined && (p.confidence ?? 0) < NEEDS_A_HUMAN;
+              return (
+                <tr key={l.listing_url_id}>
+                  <td>
+                    {l.url ? (
+                      <a href={l.url} target="_blank" rel="noreferrer">
+                        {l.title_seen ?? "(không có tiêu đề)"}
+                      </a>
+                    ) : (
+                      (l.title_seen ?? "(không có tiêu đề)")
+                    )}
+                  </td>
+                  <td className="num">{vnd(l.price_vnd)}</td>
+                  <td>{l.source_id}</td>
+                  <td>
+                    {p === undefined ? (
+                      <span className="muted">chưa có đề xuất</span>
+                    ) : (
+                      <div className="proposal">
+                        <div>
+                          {p.proposed_sku === null ? (
+                            <strong className="warn">không khớp sku nào</strong>
+                          ) : (
+                            <strong>{p.proposed_sku}</strong>
+                          )}
+                          {p.confidence !== null && (
+                            <span className={unsure ? "badge sev-medium" : "badge"}>
+                              {Math.round(p.confidence * 100)}%
+                            </span>
+                          )}
+                        </div>
+                        {p.reasoning && <p className="alert-why">{p.reasoning}</p>}
+                        <small className="muted">{p.model} · cần người xác nhận</small>
                       </div>
-                      {p.reasoning && <p className="alert-why">{p.reasoning}</p>}
-                      <small className="muted">{p.model} · cần người xác nhận</small>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
       {outOfScope.length > 0 && (
         <>
@@ -99,26 +101,28 @@ export function ChuaKhop({
             Cửa hàng bán cả hàng Hàn Quốc của thương hiệu khác. Những listing này không bao giờ khớp
             được với một SKU của Kwook, nên chúng được tách ra thay vì nằm mãi trong hàng chờ.
           </p>
-          <table>
-            <thead>
-              <tr>
-                <th>Tiêu đề quan sát được</th>
-                <th>Thương hiệu</th>
-                <th className="num">Giá</th>
-                <th>Nguồn</th>
-              </tr>
-            </thead>
-            <tbody>
-              {outOfScope.map((l) => (
-                <tr key={l.listing_url_id}>
-                  <td className="muted">{l.title_seen ?? "(không có tiêu đề)"}</td>
-                  <td>{l.out_of_scope_brand}</td>
-                  <td className="num muted">{vnd(l.price_vnd)}</td>
-                  <td>{l.source_id}</td>
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tiêu đề quan sát được</th>
+                  <th>Thương hiệu</th>
+                  <th className="num">Giá</th>
+                  <th>Nguồn</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {outOfScope.map((l) => (
+                  <tr key={l.listing_url_id}>
+                    <td className="muted">{l.title_seen ?? "(không có tiêu đề)"}</td>
+                    <td>{l.out_of_scope_brand}</td>
+                    <td className="num muted">{vnd(l.price_vnd)}</td>
+                    <td>{l.source_id}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </div>
