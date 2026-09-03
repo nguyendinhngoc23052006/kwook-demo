@@ -66,10 +66,17 @@ Four moving parts, all on free tiers:
 
 ### The sweep
 
-One HTTP request to the primary seller's store index returns all 30 of its
-listings; two smaller sources are read a page at a time. `src/sweep/parse.ts`
-extracts each card with deterministic regex — no model call, so an hourly
-cadence costs nothing and cannot drift between runs. A model is used exactly
+A source is read in one of three ways, and two of them return many products
+per request. `store_index` parses a store page's product grid — one fetch to
+kitbuy returns all 29 of its listings. `catalog_json` reads a shop's own
+public JSON catalogue; Shopify, Sapo/Bizweb and WooCommerce all publish one,
+already structured, so there is no markup to break. `single_page` reads one
+product page through its JSON-LD, meta tags or WooCommerce markup.
+
+Only URLs marked `is_entry_point` are fetched. The rest are products a parse
+discovered, and re-fetching those would re-read pages the sweep already has.
+None of it uses a model, so an hourly cadence costs nothing and cannot drift
+between runs. A model is used exactly
 once per sweep, at the very end, on the residue the rules could not resolve
 (see **Where the model is used** below).
 
@@ -194,7 +201,7 @@ moves that never happened. The bound is correctness, not performance.
 
 **The publishable Supabase key is committed.** It is inlined into the bundle
 that every visitor downloads, so committing it gives away nothing; RLS is the
-actual guard — `anon` SELECT on all seven tables and no write policy anywhere.
+actual guard — `anon` SELECT on all eight tables and no write policy anywhere.
 The **secret** key exists only as a repository secret used by the sweep.
 
 ## Operating it
@@ -216,15 +223,33 @@ CI runs `tests`, `lint`, and `typecheck` on every pull request.
 
 Built and running. Not yet done:
 
-- The catalogue holds 14 SKUs and resolves 28 of 37 listings; 6 are still
-  unmatched and 3 are competitor products the scope filter excludes.
-- Three of five sources sweep cleanly (kitbuy, abby, tiki). The other two —
-  Kwook's own site and a Tripmap aggregator page — answer scrapers with a
-  challenge page and have deactivated themselves after three failures each.
-  That is the honest state of the market, not a gap in the code.
-- **No reference price exists yet.** `reference_price_vnd` is null for all 14
-  products, so `floor_breach` has never fired; every finding on the dashboard
-  comes from comparing listings against each other. Kwook's official price
-  list would close this.
+- The catalogue holds 14 SKUs. A sweep observes 42 listings across 7 active
+  sources and writes 11 findings.
+- Nine sources are configured; seven sweep cleanly (kitbuy, abby, tiki,
+  cphfood, hunglongmart, thitruongsi, tteokbokki). Two — Kwook's own site and
+  a Tripmap aggregator page — answer scrapers with a challenge page and
+  deactivated themselves after three failures each. That is the honest state
+  of the market, not a gap in the code.
+- **Most shops selling this brand cannot be read at all.** Nineteen domains
+  and seven product pages were probed on a runner and yielded nothing: most
+  are on platforms with no public catalogue, two render prices in the browser
+  the way Shopee does, the rest refused or were unreachable. Every one is
+  recorded in `supabase/migrations/20260902200000_entry_points_and_catalogue.sql`
+  so the search is not repeated.
+- **abby is deliberately not read through its catalogue API.** That API
+  reports prices excluding tax — 10.000 đ where its own product page shows
+  10.800 đ, exactly 1,08× — and carries no tax-inclusive field. Ingesting it
+  would manufacture an 8% dispersion finding out of nothing, which is the
+  exact defect this tool exists to detect.
+- **No reference price exists yet, and it was looked for.** Kwook publishes no
+  retail price list anywhere reachable — their own site and official Shopee
+  store both refuse scrapers, and nothing else quotes a "giá niêm yết". The
+  only prices found were other resellers' and B2B wholesale ones, which are
+  not a brand floor: the same 100-lá pack appears at 195.000, 295.000 and
+  300.000 đ on one wholesale marketplace. Seeding any of those would put a
+  fiction on the dashboard and report violations against it, so
+  `reference_price_vnd` stays null for all 14 products and `floor_breach` has
+  never fired. Every finding shown comes from comparing listings against each
+  other. A price list from Kwook would close this in one migration.
 - An **Đánh giá** screen scoring detector precision against labelled fixtures
   is planned.
