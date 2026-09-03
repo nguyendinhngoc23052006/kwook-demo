@@ -1,4 +1,16 @@
 -- Seed the SKUs and detector thresholds. Re-runnable.
+--
+-- Provenance, because the rest of the catalogue states its own and this file
+-- predates the convention. The SKU CODES are ours: Kwook publishes none
+-- anywhere reachable, so these are internal keys named after pack format and
+-- weight. The PRODUCTS are real, taken from listings on sellers' pages.
+--
+-- The ALIASES here were collected by hand before the first sweep ran, so
+-- unlike every later product migration they were not drawn from observed
+-- titles. Four of them never matched anything and were removed in
+-- 20260903130000; what remains has been checked against every title ever
+-- observed. Aliases are matched by exact normalised title (see
+-- src/sweep/resolve.ts), so an alias that was never seen resolves nothing.
 
 insert into products (sku, name_canonical, category, net_weight_g, pack_format, aliases) values
   ('KW-CUON-100LA-250', 'Rong biển cuộn cơm 100 lá', 'cuon_com', 250, '100 lá / 250g', array[

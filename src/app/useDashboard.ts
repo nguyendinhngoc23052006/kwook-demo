@@ -72,6 +72,15 @@ export type Dashboard = {
   entryPointsBySource: Record<string, number>;
   /** Model proposals for listings exact matching could not place. */
   proposals: Proposal[];
+  /** What the sweep was configured to check, so the screen can say so. */
+  rules: DetectorRule[];
+};
+
+/** A detector as the rules table defines it — the sweep reads the same row. */
+export type DetectorRule = {
+  type: string;
+  severity: string;
+  active: boolean;
 };
 
 /**
@@ -93,6 +102,22 @@ const HISTORY_SWEEPS = 24;
 
 /** PostgREST's default ceiling on one response. */
 const PAGE_ROWS = 1000;
+
+/**
+ * How long any one query may take before the screen admits defeat.
+ *
+ * Without this a slow or unreachable Supabase leaves the page on "Đang tải…"
+ * for as long as the browser's own network timeout allows - minutes, with no
+ * spinner, no message and nothing to distinguish it from a page that is
+ * simply broken. In front of an audience that silence is the failure, whether
+ * or not the database eventually answers. Twelve seconds is far longer than a
+ * healthy round trip and far shorter than an interview's patience.
+ */
+const QUERY_TIMEOUT_MS = 12_000;
+
+/** The reason shown when it does. */
+export const TIMEOUT_MESSAGE =
+  "Máy chủ dữ liệu không phản hồi trong 12 giây. Có thể do mạng — hãy tải lại trang.";
 
 type State =
   | { status: "loading" }
@@ -143,7 +168,8 @@ async function readHistory(sweepIds: string[]): Promise<HistoryJoin[]> {
       .in("sweep_id", sweepIds)
       .order("observed_at", { ascending: true })
       .order("listing_url_id", { ascending: true })
-      .range(from, from + PAGE_ROWS - 1);
+      .range(from, from + PAGE_ROWS - 1)
+      .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS));
     if (error) throw new Error(error.message);
     const page = (data ?? []) as unknown as HistoryJoin[];
     rows.push(...page);
@@ -162,7 +188,8 @@ export function useDashboard(): State {
         .from("sweeps")
         .select("id,started_at,finished_at,sources_ok,sources_attempted,listings_observed,errors")
         .order("started_at", { ascending: false })
-        .limit(HISTORY_SWEEPS);
+        .limit(HISTORY_SWEEPS)
+        .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS));
       if (sweepRes.error) throw new Error(sweepRes.error.message);
 
       const sweepHistory = sweepRes.data as Sweep[];
@@ -170,20 +197,34 @@ export function useDashboard(): State {
 
       // Products and sources describe the setup, so they load even with no sweep
       // yet — that empty state should still show what is being watched.
-      const [productsRes, sourcesRes, urlsRes, proposalsRes] = await Promise.all([
-        supabase.from("products").select("sku,name_canonical,reference_price_vnd"),
+      const [productsRes, sourcesRes, urlsRes, rulesRes, proposalsRes] = await Promise.all([
+        supabase
+          .from("products")
+          .select("sku,name_canonical,reference_price_vnd")
+          .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS)),
         supabase
           .from("sources")
           .select("id,display_name,domain,active,consecutive_failures,last_success_at")
-          .order("id"),
-        supabase.from("listing_urls").select("source_id,is_entry_point"),
+          .order("id")
+          .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS)),
+        supabase
+          .from("listing_urls")
+          .select("source_id,is_entry_point")
+          .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS)),
+        supabase
+          .from("rules")
+          .select("type,severity,active")
+          .order("type")
+          .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS)),
         supabase
           .from("resolution_proposals")
-          .select("listing_url_id,proposed_sku,confidence,reasoning,model"),
+          .select("listing_url_id,proposed_sku,confidence,reasoning,model")
+          .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS)),
       ]);
       if (productsRes.error) throw new Error(productsRes.error.message);
       if (sourcesRes.error) throw new Error(sourcesRes.error.message);
       if (urlsRes.error) throw new Error(urlsRes.error.message);
+      if (rulesRes.error) throw new Error(rulesRes.error.message);
       if (proposalsRes.error) throw new Error(proposalsRes.error.message);
 
       // Two counts, because a source has two different numbers and only one of
@@ -215,13 +256,15 @@ export function useDashboard(): State {
             .select(
               "listing_url_id,title_seen,price_vnd,original_price_vnd,units_sold,review_count,listing_urls(url,product_sku,source_id,out_of_scope,out_of_scope_brand)",
             )
-            .eq("sweep_id", sweep.id),
+            .eq("sweep_id", sweep.id)
+            .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS)),
           supabase
             .from("events")
             .select(
               "id,type,severity,product_sku,listing_url_id,old_value,new_value,explanation,explained_by",
             )
-            .eq("sweep_id", sweep.id),
+            .eq("sweep_id", sweep.id)
+            .abortSignal(AbortSignal.timeout(QUERY_TIMEOUT_MS)),
           readHistory(sweepHistory.map((s) => s.id)),
         ]);
         if (obsRes.error) throw new Error(obsRes.error.message);
@@ -267,15 +310,18 @@ export function useDashboard(): State {
             urlsBySource,
             entryPointsBySource,
             proposals: proposalsRes.data as Proposal[],
+            rules: rulesRes.data as DetectorRule[],
           },
         });
       }
     }
 
     load().catch((e: unknown) => {
-      if (!cancelled) {
-        setState({ status: "error", message: e instanceof Error ? e.message : String(e) });
-      }
+      if (cancelled) return;
+      const raw = e instanceof Error ? e.message : String(e);
+      const timedOut =
+        (e instanceof Error && e.name === "TimeoutError") || /abort|signal is aborted/i.test(raw);
+      setState({ status: "error", message: timedOut ? TIMEOUT_MESSAGE : raw });
     });
 
     return () => {

@@ -7,22 +7,26 @@
  * Two copies would drift, and a detector renamed in one place would quietly
  * start showing its raw type name in the other.
  */
-export const LABELS: Record<string, { title: string; why: string }> = {
+export const LABELS: Record<string, { title: string; why: string; offWhy?: string }> = {
   self_cannibalization: {
     title: "Tự cạnh tranh giá",
-    why: "Cùng một sản phẩm được bán ở nhiều mức giá khác nhau — người mua sẽ chọn mức thấp nhất.",
+    why: "Cùng một người bán đăng một sản phẩm ở nhiều mức giá — người mua sẽ chọn mức thấp nhất.",
   },
   dead_listing: {
     title: "Listing đứng im",
-    why: "Không đổi giá và không bán thêm trong 24 giờ — có thể đã hết hàng hoặc bị ẩn.",
+    why: "Không bán thêm được sản phẩm nào trong 24 giờ, trong khi listing khác cùng sản phẩm vẫn bán được — có thể đã hết hàng hoặc bị ẩn.",
   },
   dispersion: {
     title: "Giá phân tán giữa các kênh",
-    why: "Khoảng giá giữa các nguồn rộng hơn ngưỡng cho phép.",
+    why: "Mỗi kênh bán một giá khác nhau — khách so giá sẽ mua ở kênh rẻ nhất, và đại lý bán đúng giá mất khách.",
   },
   floor_breach: {
     title: "Phá giá sàn",
     why: "Giá bán thấp hơn mức sàn đã đặt cho sản phẩm này.",
+    // Shown only when the rule is off, so the screen never implies this was
+    // checked and passed. Kwook publishes no official list price anywhere
+    // reachable, and the wholesale prices found instead disagree by 50%.
+    offWhy: "Chưa có giá niêm yết chính thức để so sánh — cần Kwook cung cấp giá sàn.",
   },
   fake_anchor: {
     title: "Giá gạch ảo",
