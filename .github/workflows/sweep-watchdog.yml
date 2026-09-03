@@ -58,6 +58,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
+          # Only used to announce a restart. Absent credentials are a
+          # configuration state, not a failure: the chain still restarts.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           set -eu
 
@@ -112,3 +116,25 @@ jobs:
 
           echo "no sweep in flight - restarting the chain on $REF"
           gh workflow run sweep.yml --repo "$REPO" --ref "$REF"
+
+          # Say so. A resurrection used to be completely silent: the chain
+          # died, this job quietly restarted it, and the only trace was a run
+          # in a tab nobody opens. That is the wrong default for the one event
+          # that means the pipeline had stopped - the hourly report keeps
+          # arriving afterwards, so its own presence proves nothing about the
+          # gap. curl, not the sweep's notifier, because this step is bash and
+          # has no Node process to borrow.
+          #
+          # Best-effort on purpose: a Telegram outage must never leave the
+          # chain unstarted, so this runs AFTER the dispatch and swallows its
+          # own failure.
+          if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+            curl -sS --max-time 15 \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              -d "disable_web_page_preview=true" \
+              --data-urlencode "text=GIÁ SÀN · chuỗi quét đã dừng và vừa được khởi động lại. Lượt quét kế tiếp sẽ chạy trong vài phút. Dữ liệu trong khoảng thời gian dừng bị thiếu." \
+              >/dev/null || echo "restart notice not sent"
+          else
+            echo "restart notice skipped: no telegram credentials"
+          fi

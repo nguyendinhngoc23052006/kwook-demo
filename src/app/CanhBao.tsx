@@ -1,13 +1,32 @@
 import { count } from "./format.js";
 import type { ListingRow } from "./group.js";
 import { LABELS } from "./labels.js";
-import type { EventRow } from "./useDashboard.js";
+import { PhamVi } from "./PhamVi.js";
+import type { DetectorRule, EventRow } from "./useDashboard.js";
 
-const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
+// "low" was never a severity this system emits - the three are info, medium
+// and high - so info fell through to the default and sorted last by accident
+// rather than by decision. It still sorts last; now it does so on purpose.
+const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, info: 2 };
 
-export function CanhBao({ events, listings }: { events: EventRow[]; listings: ListingRow[] }) {
+export function CanhBao({
+  events,
+  listings,
+  rules,
+}: {
+  events: EventRow[];
+  listings: ListingRow[];
+  rules: DetectorRule[];
+}) {
+  // No alerts is a result, not an absence of one - but only the coverage list
+  // below can say WHICH checks produced it. Shown together, always.
   if (events.length === 0) {
-    return <p className="empty">Không có cảnh báo nào trong lượt quét gần nhất. Đêm yên tĩnh.</p>;
+    return (
+      <div>
+        <p className="empty">Không có cảnh báo nào trong lượt quét gần nhất.</p>
+        <PhamVi rules={rules} events={events} />
+      </div>
+    );
   }
 
   const titleFor = new Map(listings.map((l) => [l.listing_url_id, l.title_seen]));
@@ -65,6 +84,7 @@ export function CanhBao({ events, listings }: { events: EventRow[]; listings: Li
           );
         })}
       </ul>
+      <PhamVi rules={rules} events={events} />
     </div>
   );
 }

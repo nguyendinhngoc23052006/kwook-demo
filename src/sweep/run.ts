@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { clean } from "./clean.js";
 import { type QueueCandidate, stillListed } from "./current.js";
 import type { Observation } from "./detect.js";
-import { runDetectors } from "./events.js";
+import { type Rule, runDetectors } from "./events.js";
 import { explainFindings, type FindingContext } from "./explain.js";
 import { fetchPage } from "./fetchSource.js";
 import { sendReport } from "./notify.js";
@@ -60,10 +60,16 @@ const seedsRes = await db.from("listing_urls").select("id,url,source_id,is_entry
 const productsRes = await db
   .from("products")
   .select("sku,aliases,reference_price_vnd,name_canonical,net_weight_g,pack_format");
+// The detectors' own settings. Configuration, so a failure to read it is
+// `load` and therefore fatal: running the detectors on hardcoded defaults
+// while the table says something else is exactly the silent drift this table
+// was supposed to prevent.
+const rulesRes = await db.from("rules").select("type,threshold,severity,active");
 for (const [what, res] of [
   ["sources", sourcesRes],
   ["listing_urls", seedsRes],
   ["products", productsRes],
+  ["rules", rulesRes],
 ] as const) {
   if (res.error) {
     errors.push({ stage: "load", error: `${what}: ${res.error.message}` });
@@ -73,6 +79,7 @@ for (const [what, res] of [
 const sources = sourcesRes.data;
 const seeds = seedsRes.data;
 const productRows = productsRes.data;
+const rules = (rulesRes.data ?? []) as Rule[];
 const products = (productRows ?? []) as (Product & { reference_price_vnd: number | null })[];
 const referenceBySku = new Map(
   products.flatMap((p) => (p.reference_price_vnd ? [[p.sku, p.reference_price_vnd] as const] : [])),
@@ -404,7 +411,7 @@ const currentObs = await loadObservations(sweep.id);
 let reportFindings: ReportFinding[] = [];
 
 const previousObs = prevSweep ? await loadObservations(prevSweep.id) : [];
-const findings = runDetectors(currentObs, previousObs, referenceBySku);
+const findings = runDetectors(currentObs, previousObs, referenceBySku, rules);
 
 if (findings.length > 0) {
   const { data: written, error: evErr } = await db

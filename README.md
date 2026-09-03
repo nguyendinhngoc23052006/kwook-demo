@@ -102,7 +102,7 @@ I/O and no model, which is what makes them testable.
 | `fake_anchor` | the struck-through price is implausible against the real one |
 | `dead_listing` | no units sold in 24h *while a sibling listing is selling* |
 | `new_seller` | a listing appears that was not in the previous sweep |
-| `attribution_loss` | a listing carries no recognisable brand string |
+| `attribution_loss` | a listing that publishes a brand publishes an unrecognised one |
 
 Two of these encode a judgment worth stating:
 
@@ -111,9 +111,31 @@ Two of these encode a judgment worth stating:
 everything dead. It also requires a sibling of the same SKU to be selling —
 without that guard, a quiet market would flag every listing at once.
 
-`attribution_loss` is **deliberately not run**. The source's cards carry no
-brand field, so every listing would score as a finding every hour. A detector
-that always fires is noise, not signal.
+`attribution_loss` is **scoped, not switched off**. It used to be omitted
+entirely, because feeding it kitbuy's brand-less cards flagged all 29 of them
+every hour. That was the wrong lever: the absence of a brand field is not a
+lost attribution. It now judges only observations that actually carry a brand
+— tiki publishes one on all 150 of its observations and spells it `K-Wook`,
+tteokbokki on 10 and spells it `Kwook` — so the check runs, and passes. An
+unrecognised spelling appearing later is the finding.
+
+### The thresholds are real settings, not documentation
+
+Each detector's threshold, severity and on/off switch live in the `rules`
+table, and the sweep reads that table on every run. Changing `gap_pct` there
+changes what the next sweep reports.
+
+This is worth stating because it was false until recently. The table existed,
+the dashboard showed it, and nothing read it — the values in `detect.ts` were
+hardcoded defaults that happened to equal the seeded rows, so the control
+surface looked authoritative and was inert. `src/sweep/events.ts` now applies
+every row. Severity works one way only: a rule may raise a finding's severity,
+never lower it. The lever for "stop reporting this" is the threshold, which
+changes what counts as a finding at all.
+
+`floor_breach` is the one rule seeded **off**, because it cannot answer — see
+the reference-price limitation below. Off is the honest state: an active
+detector reporting nothing every hour would be claiming the floor was checked.
 
 ### Where the model is used
 
@@ -248,8 +270,9 @@ Built and running. Not yet done:
   not a brand floor: the same 100-lá pack appears at 195.000, 295.000 and
   300.000 đ on one wholesale marketplace. Seeding any of those would put a
   fiction on the dashboard and report violations against it, so
-  `reference_price_vnd` stays null for all 14 products and `floor_breach` has
-  never fired. Every finding shown comes from comparing listings against each
+  `reference_price_vnd` stays null for all 14 products and `floor_breach` is
+  seeded inactive, so the dashboard says the check is not running rather than
+  implying it ran and passed. Every finding shown comes from comparing listings against each
   other. A price list from Kwook would close this in one migration.
 - An **Đánh giá** screen scoring detector precision against labelled fixtures
   is planned.
