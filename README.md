@@ -217,9 +217,20 @@ should catch first.
 **A units-sold counter going *down* does not count as a sale.** The
 marketplace counter is cumulative, so a drop is a relist or a reset.
 
-**History reads a bounded 24 sweeps.** PostgREST caps a response at 1000 rows
-by default; truncated history would read as *gaps*, making the differ report
-moves that never happened. The bound is correctness, not performance.
+**History reads 24 sweeps, and pages to get them.** PostgREST caps a response
+at 1000 rows, and a truncated history would read as *gaps* — the differ
+compares across them and reports moves that never happened. That cap used to
+be held off by the 24-sweep bound alone, fitted by hand to a 29-listing
+catalogue; at 42 listings the query reached 987 of the 1000 rows. The read is
+now paged, so catalogue size cannot reach the cap and the bound is a display
+choice again.
+
+**The SKU codes are this system's own.** Kwook publishes no product codes
+anywhere reachable, so `KW-CUON-100LA-250` and the rest are internal keys
+named after pack format and weight — a catalogue key, not a Kwook part
+number. The products behind them are real, and every alias is a listing title
+actually observed in a sweep: aliases match by exact normalised title, so an
+alias that was never seen would resolve nothing.
 
 **The publishable Supabase key is committed.** It is inlined into the bundle
 that every visitor downloads, so committing it gives away nothing; RLS is the
