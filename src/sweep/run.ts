@@ -6,11 +6,13 @@ import type { Observation } from "./detect.js";
 import { runDetectors } from "./events.js";
 import { explainFindings, type FindingContext } from "./explain.js";
 import { fetchPage } from "./fetchSource.js";
+import { sendReport } from "./notify.js";
 import { type SweepError, sweepFailed } from "./outcome.js";
 import { type ParsedListing, parseStoreIndex } from "./parse.js";
 import { parseCatalog, parseKwookCatalog } from "./parseCatalog.js";
 import { looksLikeChallenge, parseProductPage } from "./parseProduct.js";
 import { proposeResolutions } from "./propose.js";
+import { buildReport, type ReportFinding } from "./report.js";
 import { type Product, resolveByAlias } from "./resolve.js";
 import { classifyScope } from "./scope.js";
 
@@ -377,6 +379,11 @@ async function loadObservations(sweepId: string): Promise<Observation[]> {
 }
 
 const currentObs = await loadObservations(sweep.id);
+// Collected inside the findings block below and read at the very end, when
+// the hourly report goes out. Empty is a real answer: a quiet hour still
+// gets a report saying so.
+let reportFindings: ReportFinding[] = [];
+
 const previousObs = prevSweep ? await loadObservations(prevSweep.id) : [];
 const findings = runDetectors(currentObs, previousObs, referenceBySku);
 
@@ -443,7 +450,27 @@ if (findings.length > 0) {
         };
       });
 
+      // The report reads the same context the model was given, so a number in
+      // Telegram is the same string the dashboard shows - never re-derived.
+      reportFindings = context.map((c) => ({
+        type: c.type,
+        severity: c.severity,
+        subject: c.subject,
+        seller: c.seller,
+        oldValue: c.oldValue,
+        newValue: c.newValue,
+      }));
+
       const { explanations, model } = await explainFindings(context);
+
+      // Attach the sentences the model did write. A finding it skipped keeps
+      // its numbers and simply carries no prose.
+      const byId = new Map(context.map((c, i) => [c.id, i]));
+      for (const [id, text] of explanations) {
+        const i = byId.get(id);
+        if (i !== undefined) reportFindings[i].explanation = text;
+      }
+
       for (const [id, text] of explanations) {
         const { error } = await db
           .from("events")
@@ -478,6 +505,27 @@ console.log(
   `sweep ${sweep.id} done: ${sourcesOk}/${sourcesAttempted} sources ok ` +
     `(${(sources ?? []).length - sourcesAttempted} not configured), ${observed} listings`,
 );
+// The hourly report, last of all.
+//
+// After the sweep row is closed, so a slow or unreachable Telegram cannot
+// leave the run looking unfinished, and outside the fatal check below, so a
+// notification failure never costs an hour of otherwise good data. A
+// dashboard is pull; this is the push that makes the pipeline visible to
+// someone who is not looking at it.
+const report = buildReport({
+  startedAt: new Date(sweep.started_at ?? Date.now()),
+  sourcesOk,
+  sourcesAttempted,
+  listings: observed,
+  findings: reportFindings,
+  degraded: errors.length,
+  dashboardUrl: process.env.DASHBOARD_URL ?? null,
+});
+const notified = await sendReport(report);
+console.log(
+  notified.sent ? `report sent via ${notified.channel}` : `report not sent: ${notified.reason}`,
+);
+
 if (errors.length) {
   console.log(`${errors.length} issue(s) recorded:`, JSON.stringify(errors, null, 2));
 }
