@@ -93,12 +93,24 @@ export function runDetectors(
   run("dispersion", (t) => dispersion(current, num(t, "pct", 30)));
   run("floor_breach", (t) => floorBreach(current, referenceBySku, num(t, "tolerance", 0.1)));
   run("fake_anchor", (t) => fakeAnchor(current, num(t, "multiple", 3)));
-  run("attribution_loss", (t) =>
-    attributionLoss(
+  run("attribution_loss", (t) => {
+    // No accepted spellings means no way to tell a correct brand from a wrong
+    // one, and this detector's answer in that state is "everything is wrong":
+    // it would post a high-severity finding for all 160 observations that
+    // carry a brand. That is a misconfiguration, not a finding.
+    //
+    // The state is reachable. The spellings live in a migration and the code
+    // ships from Cloudflare, and the two land independently on a merge - so a
+    // sweep starting in between would read `{}` from a table the new code
+    // trusts. A detector whose configuration cannot distinguish pass from
+    // fail must not run.
+    const accepted = strings(t, "accepted");
+    if (accepted.length === 0) return [];
+    return attributionLoss(
       current.filter((o) => o.brandString !== null),
-      strings(t, "accepted"),
-    ),
-  );
+      accepted,
+    );
+  });
   run("new_seller", () => newSeller(current, previous));
 
   return out;

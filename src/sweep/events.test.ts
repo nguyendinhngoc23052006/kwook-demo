@@ -130,3 +130,25 @@ describe("attribution_loss only judges listings that carry a brand", () => {
     expect(found[0]?.severity).toBe("high");
   });
 });
+
+describe("a detector that cannot tell pass from fail does not run", () => {
+  it("stays silent when the rule lists no accepted spellings", () => {
+    // Reachable between a code deploy and its migration: the row still holds
+    // `{}`, and without this guard every brand-bearing listing is a finding.
+    const branded = [
+      obs({ listingUrlId: "a", brandString: "K-Wook" }),
+      obs({ listingUrlId: "b", brandString: "Kwook" }),
+    ];
+    const found = runDetectors(branded, [], new Map(), [
+      rule({ type: "attribution_loss", severity: "high", threshold: {} }),
+    ]);
+    expect(found).toEqual([]);
+  });
+
+  it("ignores an accepted list of the wrong shape", () => {
+    const found = runDetectors([obs({ brandString: "K-Wook" })], [], new Map(), [
+      rule({ type: "attribution_loss", severity: "high", threshold: { accepted: "Kwook" } }),
+    ]);
+    expect(found).toEqual([]);
+  });
+});
