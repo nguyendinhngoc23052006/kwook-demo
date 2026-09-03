@@ -85,6 +85,12 @@ jobs:
           # before and simply produces no resolution proposals.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          # The hourly report. Absent credentials are a configuration state,
+          # not a failure: the sweep runs exactly as before and simply says
+          # the report was not sent.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DASHBOARD_URL: ${{ vars.DASHBOARD_URL }}
           # Every sweep after the first lands on this minute past the hour.
           # Not :00 - GitHub documents load as concentrated at the start of
           # each hour and recommends a different minute.
