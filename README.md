@@ -206,9 +206,11 @@ number tells the reader the SKU is healthy when in fact it was never measured.
 
 **Unresolved listings are shown, never dropped.** An unresolved listing is the
 one place a silent miss can hide a real pricing problem, so it stays visible in
-*Chưa khớp* until someone claims it. Currently 24 of 29, because the product
-catalogue is seeded with 2 SKUs — that number falling is the measure of
-progress, and it is visible rather than hidden.
+*Chưa khớp* until someone claims it. Currently 13 of 46 listings, against a
+catalogue of 14 SKUs — that number falling is the measure of progress, and it
+is visible rather than hidden. One of the 13 is unresolved on purpose and will
+stay that way: a seller page titled *"Củ cải vàng K-wook 1.4Kg - 2.8Kg"* names
+two pack sizes, so no single SKU is true of it.
 
 **A price going from a number to `null` counts as a change.** Silently
 dropping it would hide a parser regression, which is the failure this system
@@ -257,7 +259,7 @@ CI runs `tests`, `lint`, and `typecheck` on every pull request.
 Built and running. Not yet done:
 
 - The catalogue holds 14 SKUs. A sweep observes 42 listings across 7 active
-  sources and writes 11 findings.
+  sources and writes 7 findings.
 - Nine sources are configured; seven sweep cleanly (kitbuy, abby, tiki,
   cphfood, hunglongmart, thitruongsi, tteokbokki). Two — Kwook's own site and
   a Tripmap aggregator page — answer scrapers with a challenge page and
