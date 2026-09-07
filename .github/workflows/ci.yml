@@ -1,6 +1,6 @@
-# Job names "tests", "lint" and "typecheck" are required BY NAME by the main
-# ruleset. Renaming one means reselecting it there, or the gate silently stops
-# requiring it.
+# Job names "tests", "lint", "typecheck" and "architecture-current" are required
+# BY NAME by the main ruleset. Renaming one means reselecting it there, or the
+# gate silently stops requiring it.
 name: ci
 
 on:
@@ -45,3 +45,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+
+  # docs/system-map.md is DERIVED from this repo's own committed files, never
+  # drawn by hand. This regenerates it and fails if the committed map disagrees -
+  # which is the only thing that keeps a diagram true. No `npm ci`: the script's
+  # imports are node:fs and node:path only, so there is nothing to install.
+  architecture-current:
+    name: architecture-current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "lts/*"
+      - run: node scripts/architecture.mjs --check
